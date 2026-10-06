@@ -4,6 +4,8 @@ ARG CARBONATE_COMMIT=baa9818402e980208ac0041ea6544f3d4683d29d
 WORKDIR /src
 RUN git clone https://github.com/develonrails/carbonate.git . && git checkout "${CARBONATE_COMMIT}"
 COPY carbonate-cli.patch /tmp/carbonate-cli.patch
+COPY bridge-calendar-api.go /src/cmd/carbonate/calendar_api.go
+COPY bridge-calendar-query.go /src/internal/calendar/query.go
 RUN git apply /tmp/carbonate-cli.patch
 RUN CGO_ENABLED=0 go build -trimpath -o /out/carbonate ./cmd/carbonate
 
@@ -13,7 +15,7 @@ COPY --from=bridge /out/carbonate /usr/local/bin/carbonate
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py entrypoint.sh ./
+COPY app.py calendar_operations.py entrypoint.sh ./
 RUN chmod 755 /app/entrypoint.sh
 USER 10001:10001
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1

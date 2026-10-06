@@ -1,7 +1,8 @@
 services:
   calendar:
     build: .
-    image: private-proton-calendar:0.1.0
+    image: private-proton-calendar:0.2.0
+    pull_policy: build
     restart: unless-stopped
     init: true
     environment:

@@ -6,3 +6,7 @@ secrets
 __pycache__
 .pytest_cache
 tests
+
+calendar-plugin
+truenas
+*.tar.gz

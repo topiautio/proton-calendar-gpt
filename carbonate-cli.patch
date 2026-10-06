@@ -8,3 +8,16 @@
  
  		if !*events && !*ics {
  			continue
+--- a/cmd/carbonate/main.go
++++ b/cmd/carbonate/main.go
+@@ -57,6 +57,10 @@
+ 		return cmdServe(ctx, args[1:], out)
+ 	case "calendars":
+ 		return cmdCalendars(ctx, args[1:], out)
++	case "calendars-json":
++		return cmdCalendarJSON(ctx, args[1:], out, false)
++	case "events-json":
++		return cmdCalendarJSON(ctx, args[1:], out, true)
+ 	case "event":
+ 		return cmdEvent(ctx, args[1:], out)
+ 	case "contacts":

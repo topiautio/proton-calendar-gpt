@@ -1,12 +1,12 @@
 # Private Proton Calendar assistant
 
-Private ChatGPT plugin for creating Proton Calendar events from natural language. The Docker adapter runs as a TrueNAS App while your computer is off. It does not call OpenAI’s paid API; no OpenAI API key is needed.
+Private ChatGPT plugin for reading and managing Proton Calendar from natural language. The Docker adapter runs as a TrueNAS App while your computer is off. It does not call OpenAI’s paid API; no OpenAI API key is needed.
 
 The current flow is: **ChatGPT on your Pixel → private Site-hosted MCP plugin → authenticated public HTTPS endpoint on your NAS → Docker adapter → experimental Carbonate bridge → Proton Calendar**. Use the installed plugin from an ordinary ChatGPT chat. You do not need to create a custom GPT.
 
 For your intended TrueNAS installation, start with [Install via YAML](truenas/README.md). The YAML embeds the image build, storage initialization and login setup, so normal installation needs no SSH or manually prepared files. Set the environment values in TrueNAS Apps; Proton challenges may need the browser-based container Shell. Sections 1–3 below document the optional shell Compose installation and networking details; do not run that stack alongside the TrueNAS App.
 
-**Status:** the adapter is tested locally, not against your Proton account. Carbonate uses an unsupported private Proton API and may break. Its pinned commit is `baa9818402e980208ac0041ea6544f3d4683d29d`. A live create-and-read-back test is required before relying on this for appointments.
+**Status:** the original live connection and event creation have been confirmed. The v0.2 read/edit/recurrence/reminder upgrade passes local tests and still needs deployment and live acceptance tests. Carbonate uses an unsupported private Proton API and may break. Its pinned commit is `baa9818402e980208ac0041ea6544f3d4683d29d`. A live create-and-read-back test is required before relying on this for appointments.
 
 ## 1. Optional shell Compose installation: prepare on TrueNAS
 
@@ -32,7 +32,7 @@ sudo docker compose run --rm --no-deps calendar carbonate auth YOUR_PROTON_USERN
 
 Enter your Proton password and second factor interactively **in this terminal**, never in ChatGPT. Human verification, if requested by Proton, may require additional manual steps. The bridge prints a new bridge password once. Store it in your password manager and use a local editor to replace the empty `secrets/bridge_password` file with that password. Keep ownership 10001:10001 and mode 600. This is different from your Proton password and the Action API key.
 
-The default works when your account has exactly one calendar. With multiple calendars run the command below and set `PROTON_CALENDAR_ID` in `.env` to the intended calendar's printed ID. Our image applies one small CLI patch to print those IDs; it doesn't alter Proton authentication or event writes. Without an ID, the bridge refuses writes to accounts with multiple calendars. For an isolated trial, you can use a separate Proton account with disposable test events.
+The default works when your account has exactly one calendar. With multiple calendars run the command below and set `PROTON_CALENDAR_ID` in `.env` to the intended calendar's printed ID. Our image adds machine-readable calendar and targeted event reads to the pinned bridge. It preserves the upstream Proton authentication and event-write implementation. Without an ID, the bridge refuses writes to accounts with multiple calendars. For an isolated trial, you can use a separate Proton account with disposable test events.
 
 ```sh
 sudo docker compose run --rm --no-deps calendar carbonate calendars -session /data/auth.json
@@ -102,7 +102,7 @@ A custom GPT is not required. Install **My Proton Calendar** from the Plugins di
 The published plugin uses the Site-hosted MCP endpoint; do not paste the NAS OpenAPI schema into the GPT editor for this route. After deploying the NAS App:
 
 1. Set `PROTON_ADAPTER_URL` in the private Site’s runtime settings to the NAS adapter’s public HTTPS origin.
-2. Set `PROTON_ACTION_API_KEY` as a **secret**, using the value from the NAS’s `secrets/action_api_key`. Enter it directly in secure settings, never chat or source.
+2. Set `PROTON_ACTION_API_KEY` as a **secret**, using `ACTION_API_KEY` from the App YAML (or `secrets/action_api_key` for shell Compose). Enter it directly in secure settings, never chat or source.
 3. Redeploy the Site’s existing saved version to activate the runtime settings.
 4. Install/connect the generated private plugin in ChatGPT, and ask it to check the calendar connection.
 
@@ -118,9 +118,26 @@ The [original custom GPT Action setup](custom-gpt-alternative.md) remains an opt
 4. Ask "I have school tomorrow at 9:45". The default duration is 60 minutes, so the proposed event ends at 10:45. Change `DEFAULT_DURATION_MINUTES` to your preference.
 5. Test repeating the exact request: it should reuse the same job rather than create a duplicate. Test a winter date and a daylight-saving transition; ChatGPT should use the event date’s timezone offset and clarify ambiguous times.
 
-The API queues writes and returns promptly. A single background worker continues after the chat turn. The plugin exposes job status so ChatGPT can check the same job without resubmitting the event. `verified` means the bridge wrote an event and then read back matching UID, title, dates, location and description from Proton. `pending`/`writing` mean it hasn't finished. `unknown` means it could already be saved: check Proton manually; the adapter deliberately doesn't blindly repeat uncertain writes.
+The API queues writes and returns promptly. A single background worker continues after the chat turn. The plugin exposes job status so ChatGPT can check the same job without resubmitting the event. `verified` means the bridge wrote an event and then read back matching UID, title, dates, location and description from Proton, including recurrence and device reminders when present. `pending`/`writing` mean it hasn't finished. `unknown` means it could already be saved: use `verifyEventWrite` for read-only reconciliation or inspect Proton manually; the adapter deliberately doesn't blindly repeat uncertain writes.
 
 Identical normalized requests reuse a durable job forever, including after restart. If you manually delete a verified event, repeating that identical request reports its original verified job; it does not recreate it or prove it still exists. This version has no job reset/retry UI. Never delete the database just to retry an uncertain write without checking the calendar first.
+
+## Calendar operations in v0.2
+
+The updated adapter and plugin support:
+
+- List calendars, read event/series details, search title/description/location, and list occurrences within up to 366 days. Read one calendar per request and use pagination for large results.
+- Create timed or all-day events; all-day end dates are exclusive. Timed dates require explicit UTC offsets.
+- Edit/reschedule or delete an individual event after reading its current revision. Unspecified fields, existing reminders and provider properties are preserved.
+- Daily, weekly, monthly and yearly recurrence with interval, optional count or end time, and optional weekdays. Timed series require an IANA timezone such as `Europe/Helsinki`, retaining local time across DST. All-day series use count rather than until.
+- Edit a series or one occurrence, and cancel a selected occurrence without deleting the series. Occurrence changes use the original recurrence ID even after rescheduling. Rescheduling a series that already has exceptions requires manual review in Proton.
+- Add, replace, remove and read up to five device reminders, expressed as minutes before start (0–10080). An empty list removes reminders. Existing email reminders are preserved during unrelated edits; this version creates device reminders only. Device notification delivery depends on Proton and the device and is not proven by a saved alarm.
+
+Read and mutation requests use a durable background queue so the chat connection does not time out while the bridge decrypts a calendar. Poll `getCalendarOperationStatus`: `ready` contains the result, `failed` is a pre-write failure, and `unknown` requires inspection before further mutations. Only `result.verified: true` confirms an edit/delete read-back. Mutations with the same input and revision reuse the original operation. New reads always obtain fresh data.
+
+Before editing, use `getCalendarEvent` to obtain the UID, calendar ID and current revision. A stale revision rejects the mutation. Specify `event`, `series` or `occurrence` explicitly; the assistant should clarify ambiguous scope. Attendee events and events with unverifiable signatures remain read-only. This is not an official Proton integration or a claim of complete Google Calendar feature parity. Invitations and calendar sharing are outside this release.
+
+See [the live acceptance checklist](ACCEPTANCE.md) and [completion target](ROADMAP.md). Keep Test 2 unchanged during testing.
 
 ## Maintenance and removal
 

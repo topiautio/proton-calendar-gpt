@@ -79,21 +79,23 @@ def row_for(client):
 def test_success_only_after_readback(client, monkeypatch):
     row = row_for(client)
     calls = []
+    monkeypatch.setattr(module, "CALENDAR_ID", "test-calendar")
     def bridge(args, content=None):
         calls.append(args)
         if content:
             bridge.content = content
             return "Created event upstream-id\n"
-        return "\n".join("    | " + line for line in bridge.content.decode().split("\r\n"))
+        return json.dumps({"calendar_id":"test-calendar", "events":[{"ics":bridge.content.decode(),"unverified":False}],"unreadable_count":0})
     monkeypatch.setattr(module, "run_bridge", bridge)
     module.process_job(row)
     assert module.get_status(row["id"])["state"] == "verified"
-    assert calls[1] == ["calendars", "--ics"]
+    assert calls[1] == ["events-json", "-calendar", "test-calendar", "-uid", row["id"] + "@private-proton-gpt"]
 
 
 def test_uncertain_write_not_retried(client, monkeypatch):
     row = row_for(client)
     calls = []
+    monkeypatch.setattr(module, "CALENDAR_ID", "test-calendar")
     def fail(args, content=None):
         calls.append(args)
         raise module.BridgeError("Simulate write succeeded but reply timed out")

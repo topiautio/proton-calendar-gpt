@@ -21,7 +21,9 @@ The owner-private hosted MCP plugin responds and the NAS connection is reachable
 The owner confirmed that Test 2 appeared in the selected calendar at 13:00–14:00
 Europe/Helsinki. Its job later became `unknown`, so write verification still has a
 defect or timeout to resolve. Read/search and mutation tools beyond creation were
-not exposed by the original plugin.
+not exposed by the original plugin. The v0.2 source now implements these tools,
+including recurring series/occurrences and device reminders. Local validation
+passes; the new deployment and live acceptance checks are in progress.
 
 Local tests do not establish live Proton compatibility. Completion requires live
 read-back plus explicit edit, recurrence and reminder tests on disposable events.

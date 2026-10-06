@@ -31,7 +31,8 @@ test('anonymous requests never reach the calendar; initialization and discovery 
   const init = await (await handleMcp(request('initialize', { protocolVersion: '2025-06-18' }), env)).json();
   assert.equal(init.result.protocolVersion, '2025-06-18');
   const list = await (await handleMcp(request('tools/list'), env)).json();
-  assert.deepEqual(list.result.tools.map(t=>t.name), ['getIntegrationStatus','getCalendarContext','createCalendarEvent','getEventStatus']);
+  for (const name of ['getIntegrationStatus','getCalendarContext','createCalendarEvent','getEventStatus','listCalendars','listCalendarEvents','getCalendarEvent','updateCalendarEvent','deleteCalendarEvent','getCalendarOperationStatus','verifyEventWrite']) assert.ok(list.result.tools.some(t=>t.name===name));
+  assert.equal(list.result.tools.find(t=>t.name==='deleteCalendarEvent').annotations.destructiveHint,true);
 });
 
 test('undeployed calendar reports disconnected and cannot pretend to save an event', async () => {
@@ -99,4 +100,41 @@ test('uncertain writes and upstream secrets are never exposed or retried', async
     globalThis.fetch = async () => new Response('upstream secret', {status:401});
     assert.doesNotMatch(JSON.stringify(await call('getCalendarContext')),/upstream secret/);
   } finally { globalThis.fetch = original; }
+});
+
+
+test('new features reject an old adapter with an actionable message', async () => {
+  const original = globalThis.fetch; const requests=[];
+  globalThis.fetch = async (url) => {requests.push(url);return Response.json({now:'2026-10-06T12:00:00+03:00',timezone:'Europe/Helsinki',default_duration_minutes:60,provider:'proton',login_configured:true});};
+  try {
+    const result=await call('listCalendars');
+    assert.equal(result.result.isError,true);
+    assert.match(result.result.content[0].text,/updated TrueNAS YAML/);
+    assert.deepEqual(requests,['https://calendar.test/context']);
+  } finally {globalThis.fetch=original;}
+});
+
+test('recurring creation forwards timezone, all-day dates and device reminders', async () => {
+  const original=globalThis.fetch;const payload={title:'Weekly',start:'2026-10-19T09:00:00+03:00',recurrence:{frequency:'WEEKLY',count:3},recurrence_timezone:'Europe/Helsinki',reminders_minutes:[15]};
+  globalThis.fetch=async (url, options)=>{assert.deepEqual(JSON.parse(options.body),payload);return Response.json({job_id:'c'.repeat(64),state:'pending',event:payload,error:'',calendar_url:'https://calendar.proton.me',poll_after_seconds:3});};
+  try {assert.equal((await call('createCalendarEvent',payload)).result.isError,false);} finally {globalThis.fetch=original;}
+});
+
+test('existing event mutations require revision and preserve deliberate scope', async () => {
+  const original=globalThis.fetch;const requests=[];
+  globalThis.fetch=async(url,options)=>{
+    requests.push({url,options});
+    if(url.endsWith('/context'))return Response.json({now:'2026-10-06T12:00:00+03:00',timezone:'Europe/Helsinki',default_duration_minutes:60,provider:'proton',login_configured:true,api_version:2});
+    return Response.json({operation_id:'d'.repeat(64),state:'pending',result:{},error:'',poll_after_seconds:3});
+  };
+  try {
+    assert.equal((await call('updateCalendarEvent',{uid:'event',scope:'series',changes:{title:'Changed'}})).result.isError,true);
+    assert.equal(requests.length,0);
+    const payload={uid:'event',expected_revision:'a'.repeat(64),scope:'occurrence',recurrence_id:'2026-10-26T09:00:00+02:00',changes:{start:'2026-10-26T14:00:00+02:00',reminders_minutes:[]}};
+    assert.equal((await call('updateCalendarEvent',payload)).result.isError,false);
+    assert.deepEqual(JSON.parse(requests[1].options.body),{kind:'update_event',...payload});
+    assert.equal(requests[1].url,'https://calendar.test/operations');
+    await call('getCalendarOperationStatus',{operation_id:'d'.repeat(64)});
+    assert.equal(requests[2].options.method,'GET');
+  } finally {globalThis.fetch=original;}
 });

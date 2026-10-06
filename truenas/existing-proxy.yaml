@@ -13,123 +13,237 @@ services:
         --- a/cmd/carbonate/calendars.go\n+++ b/cmd/carbonate/calendars.go\n@@ -56,6\
         \ +56,7 @@\n \t\t}\n \n \t\tfmt.Fprintf(out, \"\\n%s \u2014 %d event(s)\\\
         n\", name, count)\n+\t\tfmt.Fprintf(out, \"  Calendar ID: %s\\n\", cal.ID)\n\
-        \ \n \t\tif !*events && !*ics {\n \t\t\tcontinue\n\nCALENDAR_SOURCE\nRUN git\
-        \ apply /tmp/carbonate-cli.patch\nRUN CGO_ENABLED=0 go build -trimpath -o\
-        \ /out/carbonate ./cmd/carbonate\n\nFROM python:3.14-slim-bookworm\nRUN groupadd\
-        \ -g 10001 calendar && useradd -u 10001 -g calendar -M calendar && mkdir /data\
-        \ /app && chown calendar:calendar /data\nCOPY --from=bridge /out/carbonate\
+        \ \n \t\tif !*events && !*ics {\n \t\t\tcontinue\n--- a/cmd/carbonate/main.go\n\
+        +++ b/cmd/carbonate/main.go\n@@ -57,6 +57,10 @@\n \t\treturn cmdServe(ctx,\
+        \ args[1:], out)\n \tcase \"calendars\":\n \t\treturn cmdCalendars(ctx, args[1:],\
+        \ out)\n+\tcase \"calendars-json\":\n+\t\treturn cmdCalendarJSON(ctx, args[1:],\
+        \ out, false)\n+\tcase \"events-json\":\n+\t\treturn cmdCalendarJSON(ctx,\
+        \ args[1:], out, true)\n \tcase \"event\":\n \t\treturn cmdEvent(ctx, args[1:],\
+        \ out)\n \tcase \"contacts\":\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE'\
+        \ /src/cmd/carbonate/calendar_api.go\npackage main\n\nimport (\n\t\"context\"\
+        \n\t\"encoding/json\"\n\t\"errors\"\n\t\"flag\"\n\t\"github.com/develonrails/carbonate/internal/calendar\"\
+        \n\t\"io\"\n)\n\n// Machine-readable calendar data for the private adapter.\
+        \ No account/session\n// credentials are included. Targeted UID reads decrypt\
+        \ only the requested event.\nfunc cmdCalendarJSON(ctx context.Context, args\
+        \ []string, out io.Writer, events bool) error {\n\tfs := flag.NewFlagSet(\"\
+        calendar json\", flag.ContinueOnError)\n\tfs.SetOutput(out)\n\tpath := fs.String(\"\
+        session\", \"\", \"session file\")\n\tcalendarID := fs.String(\"calendar\"\
+        , \"\", \"calendar ID\")\n\tuid := fs.String(\"uid\", \"\", \"only this iCalendar\
+        \ UID\")\n\tif err := fs.Parse(args); err != nil {\n\t\treturn err\n\t}\n\t\
+        if fs.NArg() != 0 {\n\t\treturn errors.New(\"unexpected positional argument\"\
+        )\n\t}\n\tconn, err := connect(ctx, *path)\n\tif err != nil {\n\t\treturn\
+        \ err\n\t}\n\tdefer conn.Close()\n\tif !events {\n\t\tcalendars, err := calendar.List(ctx,\
+        \ conn)\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\treturn json.NewEncoder(out).Encode(calendars)\n\
+        \t}\n\tif *calendarID == \"\" {\n\t\treturn errors.New(\"calendar ID is required\"\
+        )\n\t}\n\tdecoded, unreadable, err := calendar.EventsForUID(ctx, conn, *calendarID,\
+        \ *uid)\n\tif err != nil {\n\t\treturn err\n\t}\n\ttype item struct {\n\t\t\
+        UID        string `json:\"uid\"`\n\t\tICS        string `json:\"ics\"`\n\t\
+        \tModified   string `json:\"modified\"`\n\t\tUnverified bool   `json:\"unverified\"\
+        `\n\t}\n\tresult := struct {\n\t\tCalendarID      string `json:\"calendar_id\"\
+        `\n\t\tEvents          []item `json:\"events\"`\n\t\tUnreadableCount int \
+        \   `json:\"unreadable_count\"`\n\t}{CalendarID: *calendarID, Events: []item{},\
+        \ UnreadableCount: len(unreadable)}\n\tfor _, event := range decoded {\n\t\
+        \tresult.Events = append(result.Events, item{event.UID, event.ICS(), event.Modified.UTC().Format(\"\
+        2006-01-02T15:04:05Z\"), event.Unverified})\n\t}\n\treturn json.NewEncoder(out).Encode(result)\n\
+        }\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE' /src/internal/calendar/query.go\n\
+        package calendar\n\nimport (\n\t\"context\"\n\t\"github.com/develonrails/carbonate/internal/proton\"\
+        \n)\n\n// EventsForUID avoids decrypting an entire account to verify one appointment.\n\
+        // An empty UID deliberately requests the whole selected calendar.\nfunc EventsForUID(ctx\
+        \ context.Context, conn *proton.Conn, calendarID, uid string) ([]Event, []string,\
+        \ error) {\n\tkeys, err := conn.CalendarKeys(ctx, calendarID)\n\tif err !=\
+        \ nil {\n\t\treturn nil, nil, err\n\t}\n\traw, err := fetchAll(ctx, conn,\
+        \ calendarID)\n\tif err != nil {\n\t\treturn nil, nil, err\n\t}\n\tif uid\
+        \ != \"\" {\n\t\tselected := raw[:0]\n\t\tfor _, event := range raw {\n\t\t\
+        \tif event.UID == uid {\n\t\t\t\tselected = append(selected, event)\n\t\t\t\
+        }\n\t\t}\n\t\traw = selected\n\t}\n\tevents, unreadable := decodeAll(raw,\
+        \ keys.CalKR, keys.AddrKR)\n\treturn events, unreadable, nil\n}\n\nCALENDAR_SOURCE\n\
+        RUN git apply /tmp/carbonate-cli.patch\nRUN CGO_ENABLED=0 go build -trimpath\
+        \ -o /out/carbonate ./cmd/carbonate\n\nFROM python:3.14-slim-bookworm\nRUN\
+        \ groupadd -g 10001 calendar && useradd -u 10001 -g calendar -M calendar &&\
+        \ mkdir /data /app && chown calendar:calendar /data\nCOPY --from=bridge /out/carbonate\
         \ /usr/local/bin/carbonate\nWORKDIR /app\nCOPY <<'CALENDAR_SOURCE' /app/requirements.txt\n\
-        fastapi==0.142.2\nuvicorn==0.54.0\nicalendar==7.3.0\n\nCALENDAR_SOURCE\nRUN\
-        \ pip install --no-cache-dir -r requirements.txt\nCOPY <<'CALENDAR_SOURCE'\
-        \ /app/app.py\n\"\"\"Private GPT Action adapter for the experimental Carbonate\
-        \ Proton bridge.\"\"\"\nimport hashlib\nimport hmac\nimport json\nimport os\n\
-        import re\nimport sqlite3\nimport subprocess\nimport threading\nimport time\n\
-        from contextlib import asynccontextmanager\nfrom datetime import datetime,\
-        \ timedelta, timezone\nfrom pathlib import Path\nfrom zoneinfo import ZoneInfo\n\
-        \nfrom fastapi import Depends, FastAPI, HTTPException\nfrom fastapi.security\
-        \ import HTTPAuthorizationCredentials, HTTPBearer\nfrom icalendar import Calendar,\
-        \ Event\nfrom pydantic import BaseModel, ConfigDict, Field, field_validator,\
-        \ model_validator\n\nDATA = Path(os.getenv(\"DATA_DIR\", \"/data\"))\nTZ =\
-        \ os.getenv(\"CALENDAR_TIMEZONE\", \"Europe/Helsinki\")\nDEFAULT_DURATION\
-        \ = int(os.getenv(\"DEFAULT_DURATION_MINUTES\", \"60\"))\nCALENDAR_ID = os.getenv(\"\
-        PROTON_CALENDAR_ID\", \"\")\nPUBLIC_URL = os.getenv(\"PUBLIC_URL\", \"https://calendar.example.com\"\
-        ).rstrip(\"/\")\nSTOP = threading.Event()\nWAKE = threading.Event()\n\n\n\
-        def secret(name):\n    path = os.getenv(name + \"_FILE\")\n    return Path(path).read_text().strip()\
-        \ if path else os.getenv(name, \"\")\n\n\ndef db():\n    conn = sqlite3.connect(DATA\
-        \ / \"jobs.sqlite\", timeout=5)\n    conn.row_factory = sqlite3.Row\n    return\
-        \ conn\n\n\nclass EventRequest(BaseModel):\n    model_config = ConfigDict(extra=\"\
-        forbid\")\n    title: str = Field(min_length=1, max_length=200)\n    start:\
-        \ datetime = Field(description=\"Absolute ISO 8601 date/time with UTC offset.\"\
-        )\n    end: datetime | None = Field(default=None, description=\"End with UTC\
-        \ offset; omit to use the configured default duration.\")\n    location: str\
-        \ = Field(default=\"\", max_length=300)\n    description: str = Field(default=\"\
-        \", max_length=2000)\n\n    @field_validator(\"title\", \"location\", \"description\"\
+        fastapi==0.142.2\nuvicorn==0.54.0\nicalendar==7.3.0\nrecurring-ical-events==3.8.2\n\
+        \nCALENDAR_SOURCE\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY\
+        \ <<'CALENDAR_SOURCE' /app/app.py\n\"\"\"Private GPT Action adapter for the\
+        \ experimental Carbonate Proton bridge.\"\"\"\nimport hashlib\nimport hmac\n\
+        import json\nimport os\nimport re\nimport sqlite3\nimport subprocess\nimport\
+        \ threading\nimport time\nimport uuid\nfrom contextlib import asynccontextmanager\n\
+        from datetime import date, datetime, timedelta, timezone\nfrom pathlib import\
+        \ Path\nfrom zoneinfo import ZoneInfo\n\nfrom fastapi import Depends, FastAPI,\
+        \ HTTPException\nfrom fastapi.security import HTTPAuthorizationCredentials,\
+        \ HTTPBearer\nfrom icalendar import Calendar, Event\nfrom pydantic import\
+        \ BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator\n\
+        import calendar_operations as operations\n\nDATA = Path(os.getenv(\"DATA_DIR\"\
+        , \"/data\"))\nTZ = os.getenv(\"CALENDAR_TIMEZONE\", \"Europe/Helsinki\")\n\
+        DEFAULT_DURATION = int(os.getenv(\"DEFAULT_DURATION_MINUTES\", \"60\"))\n\
+        CALENDAR_ID = os.getenv(\"PROTON_CALENDAR_ID\", \"\")\nPUBLIC_URL = os.getenv(\"\
+        PUBLIC_URL\", \"https://calendar.example.com\").rstrip(\"/\")\nSTOP = threading.Event()\n\
+        WAKE = threading.Event()\n\n\ndef secret(name):\n    path = os.getenv(name\
+        \ + \"_FILE\")\n    return Path(path).read_text().strip() if path else os.getenv(name,\
+        \ \"\")\n\n\ndef db():\n    conn = sqlite3.connect(DATA / \"jobs.sqlite\"\
+        , timeout=5)\n    conn.row_factory = sqlite3.Row\n    return conn\n\n\nclass\
+        \ EventRequest(BaseModel):\n    model_config = ConfigDict(extra=\"forbid\"\
+        )\n    title: str = Field(min_length=1, max_length=200)\n    start: datetime\
+        \ | date = Field(description=\"Absolute ISO 8601 date/time with UTC offset.\"\
+        )\n    end: datetime | date | None = Field(default=None, description=\"End\
+        \ with UTC offset; omit to use the configured default duration.\")\n    calendar_id:\
+        \ str | None = Field(default=None, pattern=operations.CALENDAR_PATTERN)\n\
+        \    recurrence: operations.Recurrence | None = None\n    recurrence_timezone:\
+        \ str | None = None\n    reminders_minutes: list[StrictInt] = Field(default_factory=list,\
+        \ max_length=5)\n    location: str = Field(default=\"\", max_length=300)\n\
+        \    description: str = Field(default=\"\", max_length=2000)\n\n    @field_validator('start',\
+        \ 'end', mode='before')\n    @classmethod\n    def distinguish_dates(cls,\
+        \ value):\n        if isinstance(value, str) and re.fullmatch(r'\\d{4}-\\\
+        d{2}-\\d{2}', value):\n            return date.fromisoformat(value)\n    \
+        \    return value\n\n    @field_validator(\"title\", \"location\", \"description\"\
         )\n    @classmethod\n    def clean_text(cls, value):\n        if any(ord(c)\
         \ < 32 and c not in \"\\n\\t\" for c in value):\n            raise ValueError(\"\
         Control characters are not allowed\")\n        return value.strip()\n\n  \
         \  @model_validator(mode=\"after\")\n    def check_times(self):\n        if\
         \ not self.title:\n            raise ValueError(\"Title must not be blank\"\
-        )\n        if self.start.utcoffset() is None or (self.end and self.end.utcoffset()\
-        \ is None):\n            raise ValueError(\"Dates require an explicit UTC\
-        \ offset\")\n        self.start = self.start.astimezone(timezone.utc)\n  \
-        \      self.end = (self.end or (self.start + timedelta(minutes=DEFAULT_DURATION))).astimezone(timezone.utc)\n\
-        \        if self.end <= self.start or self.end - self.start > timedelta(days=7):\n\
-        \            raise ValueError(\"End must follow start and duration must not\
-        \ exceed seven days\")\n        if self.start.microsecond or self.end.microsecond:\n\
-        \            raise ValueError(\"Use whole seconds\")\n        return self\n\
-        \n\ndef identity(event):\n    payload = event.model_dump(mode=\"json\")\n\
+        )\n        timed = isinstance(self.start, datetime)\n        if self.end is\
+        \ not None and isinstance(self.end, datetime) != timed:\n            raise\
+        \ ValueError(\"Start and end must both be dates or both be date-times\")\n\
+        \        if timed:\n            if self.start.utcoffset() is None or (self.end\
+        \ and self.end.utcoffset() is None):\n                raise ValueError(\"\
+        Dates require an explicit UTC offset\")\n            self.start = self.start.astimezone(timezone.utc)\n\
+        \            self.end = (self.end or (self.start + timedelta(minutes=DEFAULT_DURATION))).astimezone(timezone.utc)\n\
+        \            if self.start.microsecond or self.end.microsecond:\n        \
+        \        raise ValueError(\"Use whole seconds\")\n        else:\n        \
+        \    self.end = self.end or self.start + timedelta(days=1)\n        if self.end\
+        \ <= self.start or self.end - self.start > timedelta(days=7):\n          \
+        \  raise ValueError(\"End must follow start and duration must not exceed seven\
+        \ days\")\n        if any(type(v) is not int or not 0 <= v <= 10080 for v\
+        \ in self.reminders_minutes):\n            raise ValueError(\"Device reminders\
+        \ must be zero to 10080 minutes before the event\")\n        self.reminders_minutes\
+        \ = sorted(set(self.reminders_minutes))\n        if self.recurrence_timezone:\n\
+        \            try:\n                ZoneInfo(self.recurrence_timezone)\n  \
+        \          except (KeyError, ValueError, TypeError):\n                raise\
+        \ ValueError(\"Use a valid IANA recurrence timezone\")\n        if self.recurrence:\n\
+        \            if timed and not self.recurrence_timezone:\n                raise\
+        \ ValueError(\"Recurring timed events require an IANA recurrence timezone\"\
+        )\n            if self.recurrence.until:\n                if not timed or\
+        \ self.recurrence.until < self.start:\n                    raise ValueError(\"\
+        until must follow a timed series start; use count for all-day series\")\n\
+        \        return self\n\n\ndef identity(event):\n    payload = event.model_dump(mode=\"\
+        json\")\n    # Keep existing individual-event request identities stable after\
+        \ upgrades.\n    for key in ('calendar_id', 'recurrence', 'recurrence_timezone',\
+        \ 'reminders_minutes'):\n        if not payload[key]:\n            del payload[key]\n\
         \    raw = json.dumps(payload, sort_keys=True, separators=(\",\", \":\"))\n\
         \    return hashlib.sha256(raw.encode()).hexdigest(), raw\n\n\ndef make_ics(event,\
         \ uid):\n    cal = Calendar()\n    cal.add(\"prodid\", \"-//Private Proton\
         \ Calendar GPT//EN\")\n    cal.add(\"version\", \"2.0\")\n    item = Event()\n\
         \    item.add(\"uid\", uid)\n    item.add(\"dtstamp\", datetime.now(timezone.utc))\n\
-        \    item.add(\"dtstart\", event.start)\n    item.add(\"dtend\", event.end)\n\
-        \    item.add(\"summary\", event.title)\n    if event.location:\n        item.add(\"\
-        location\", event.location)\n    if event.description:\n        item.add(\"\
-        description\", event.description)\n    cal.add_component(item)\n    return\
-        \ cal.to_ical()\n\n\nclass BridgeError(Exception):\n    pass\n\n\nclass CalendarContext(BaseModel):\n\
-        \    now: str\n    timezone: str\n    default_duration_minutes: int\n    provider:\
-        \ str\n    login_configured: bool\n\n\nclass EventStatus(BaseModel):\n   \
-        \ job_id: str\n    state: str = Field(description=\"pending, writing, verified,\
-        \ or unknown. Only verified confirms a saved event.\")\n    event: dict\n\
-        \    error: str\n    calendar_url: str\n    poll_after_seconds: int\n\n\n\
-        def run_bridge(args, content=None):\n    env = os.environ.copy()\n    env[\"\
-        CARBONATE_BRIDGE_PASSWORD\"] = secret(\"CARBONATE_BRIDGE_PASSWORD\")\n   \
-        \ env[\"CARBONATE_NO_INVITATIONS\"] = \"1\"\n    try:\n        result = subprocess.run(\n\
-        \            [\"carbonate\", *args, \"-session\", str(DATA / \"auth.json\"\
-        )],\n            input=content, capture_output=True, timeout=90, env=env,\n\
-        \        )\n    except (subprocess.TimeoutExpired, OSError) as exc:\n    \
-        \    raise BridgeError(\"Bridge unavailable or timed out\") from exc\n   \
-        \ if result.returncode:\n        # Never send upstream errors, tokens, or\
-        \ account data to the API client.\n        raise BridgeError(\"Bridge command\
-        \ failed; check login and calendar configuration\")\n    return result.stdout.decode(\"\
-        utf-8\", errors=\"strict\")\n\n\ndef verified_in_output(output, event, uid):\n\
-        \    # Carbonate's calendars --ics indents each iCalendar line with '    |\
-        \ '.\n    lines = [line[6:] for line in output.splitlines() if line.startswith(\"\
-        \    | \")]\n    text = \"\\r\\n\".join(lines) + \"\\r\\n\"\n    # Each event\
-        \ is a separate VCALENDAR; parse independently.\n    blocks = re.findall(r\"\
-        BEGIN:VCALENDAR\\r\\n.*?END:VCALENDAR\", text, re.S)\n    for block in blocks:\n\
-        \        for item in Calendar.from_ical(block).walk(\"VEVENT\"):\n       \
-        \     if str(item.get(\"UID\", \"\")) != uid:\n                continue\n\
-        \            return (\n                str(item.get(\"SUMMARY\", \"\")) ==\
-        \ event.title\n                and item.decoded(\"DTSTART\") == event.start\n\
-        \                and item.decoded(\"DTEND\") == event.end\n              \
-        \  and str(item.get(\"LOCATION\", \"\")) == event.location\n             \
-        \   and str(item.get(\"DESCRIPTION\", \"\")) == event.description\n      \
-        \      )\n    return False\n\n\ndef update_job(job_id, state, error=\"\"):\n\
-        \    with db() as conn:\n        conn.execute(\"UPDATE jobs SET state=?, error=?\
-        \ WHERE id=?\", (state, error, job_id))\n\n\ndef process_job(row):\n    event\
-        \ = EventRequest.model_validate_json(row[\"payload\"])\n    uid = row[\"id\"\
-        ] + \"@private-proton-gpt\"\n    args = [\"event\", \"put\"]\n    if CALENDAR_ID:\n\
-        \        args += [\"-calendar\", CALENDAR_ID]\n    try:\n        run_bridge(args,\
-        \ make_ics(event, uid))\n        output = run_bridge([\"calendars\", \"--ics\"\
-        ])\n        if not verified_in_output(output, event, uid):\n            raise\
-        \ BridgeError(\"Write was not verified\")\n    except Exception:\n       \
-        \ update_job(row[\"id\"], \"unknown\", \"Could not verify the write. Check\
-        \ Proton Calendar before trying again; the event may already exist.\")\n \
-        \   else:\n        update_job(row[\"id\"], \"verified\")\n\n\ndef worker():\n\
-        \    while not STOP.is_set():\n        with db() as conn:\n            row\
-        \ = conn.execute(\"SELECT * FROM jobs WHERE state='pending' ORDER BY created\
-        \ LIMIT 1\").fetchone()\n            if row:\n                conn.execute(\"\
-        UPDATE jobs SET state='writing' WHERE id=?\", (row[\"id\"],))\n        if\
-        \ row:\n            process_job(row)\n        else:\n            WAKE.wait(1)\n\
-        \            WAKE.clear()\n\n\n@asynccontextmanager\nasync def lifespan(app):\n\
-        \    if len(secret(\"ACTION_API_KEY\")) < 32:\n        raise RuntimeError(\"\
-        Set ACTION_API_KEY_FILE to a secret containing at least 32 characters\")\n\
-        \    if not secret(\"CARBONATE_BRIDGE_PASSWORD\"):\n        raise RuntimeError(\"\
-        Configure CARBONATE_BRIDGE_PASSWORD_FILE after Proton login\")\n    ZoneInfo(TZ)\n\
-        \    if not 1 <= DEFAULT_DURATION <= 10080:\n        raise RuntimeError(\"\
-        Invalid default duration\")\n    DATA.mkdir(mode=0o700, parents=True, exist_ok=True)\n\
-        \    with db() as conn:\n        conn.execute(\"CREATE TABLE IF NOT EXISTS\
-        \ jobs (id TEXT PRIMARY KEY, payload TEXT NOT NULL, state TEXT NOT NULL, error\
-        \ TEXT NOT NULL DEFAULT '', created REAL NOT NULL)\")\n        conn.execute(\"\
-        UPDATE jobs SET state='unknown', error='Server restarted during the write.\
-        \ Check Proton Calendar; no automatic retry was made.' WHERE state='writing'\"\
-        )\n    os.chmod(DATA / \"jobs.sqlite\", 0o600)\n    STOP.clear()\n    thread\
-        \ = threading.Thread(target=worker, daemon=True)\n    thread.start()\n   \
-        \ yield\n    STOP.set()\n    WAKE.set()\n    thread.join(timeout=2)\n\n\n\
-        app = FastAPI(title=\"Private Proton Calendar\", version=\"0.1.0\", lifespan=lifespan,\n\
-        \              servers=[{\"url\": PUBLIC_URL}], docs_url=None, redoc_url=None)\n\
+        \    zone = ZoneInfo(event.recurrence_timezone) if event.recurrence and isinstance(event.start,\
+        \ datetime) else None\n    item.add(\"dtstart\", event.start.astimezone(zone)\
+        \ if zone else event.start)\n    item.add(\"dtend\", event.end.astimezone(zone)\
+        \ if zone else event.end)\n    if event.recurrence:\n        item.add(\"rrule\"\
+        , operations.rule_value(event.recurrence))\n    operations.reminders(item,\
+        \ event.reminders_minutes)\n    item.add(\"summary\", event.title)\n    if\
+        \ event.location:\n        item.add(\"location\", event.location)\n    if\
+        \ event.description:\n        item.add(\"description\", event.description)\n\
+        \    cal.add_component(item)\n    return cal.to_ical()\n\n\nclass BridgeError(Exception):\n\
+        \    pass\n\n\nclass CalendarContext(BaseModel):\n    now: str\n    timezone:\
+        \ str\n    default_duration_minutes: int\n    provider: str\n    login_configured:\
+        \ bool\n    api_version: int = 2\n    selected_calendar_id: str\n    capabilities:\
+        \ list[str]\n\n\nclass EventStatus(BaseModel):\n    job_id: str\n    state:\
+        \ str = Field(description=\"pending, writing, verified, or unknown. Only verified\
+        \ confirms a saved event.\")\n    event: dict\n    error: str\n    calendar_url:\
+        \ str\n    poll_after_seconds: int\n\n\ndef run_bridge(args, content=None):\n\
+        \    env = os.environ.copy()\n    env[\"CARBONATE_BRIDGE_PASSWORD\"] = secret(\"\
+        CARBONATE_BRIDGE_PASSWORD\")\n    env[\"CARBONATE_NO_INVITATIONS\"] = \"1\"\
+        \n    try:\n        result = subprocess.run(\n            [\"carbonate\",\
+        \ *args, \"-session\", str(DATA / \"auth.json\")],\n            input=content,\
+        \ capture_output=True, timeout=90, env=env,\n        )\n    except (subprocess.TimeoutExpired,\
+        \ OSError) as exc:\n        raise BridgeError(\"Bridge unavailable or timed\
+        \ out\") from exc\n    if result.returncode:\n        # Never send upstream\
+        \ errors, tokens, or account data to the API client.\n        raise BridgeError(\"\
+        Bridge command failed; check login and calendar configuration\")\n    return\
+        \ result.stdout.decode(\"utf-8\", errors=\"strict\")\n\n\ndef verified_in_output(output,\
+        \ event, uid):\n    # Carbonate's calendars --ics indents each iCalendar line\
+        \ with '    | '.\n    lines = [line[6:] for line in output.splitlines() if\
+        \ line.startswith(\"    | \")]\n    text = \"\\r\\n\".join(lines) + \"\\r\\\
+        n\"\n    # Each event is a separate VCALENDAR; parse independently.\n    blocks\
+        \ = re.findall(r\"BEGIN:VCALENDAR\\r\\n.*?END:VCALENDAR\", text, re.S)\n \
+        \   for block in blocks:\n        for item in Calendar.from_ical(block).walk(\"\
+        VEVENT\"):\n            if str(item.get(\"UID\", \"\")) != uid:\n        \
+        \        continue\n            return (\n                str(item.get(\"SUMMARY\"\
+        , \"\")) == event.title\n                and item.decoded(\"DTSTART\") ==\
+        \ event.start\n                and item.decoded(\"DTEND\") == event.end\n\
+        \                and str(item.get(\"LOCATION\", \"\")) == event.location\n\
+        \                and str(item.get(\"DESCRIPTION\", \"\")) == event.description\n\
+        \            )\n    return False\n\n\ndef update_job(job_id, state, error=\"\
+        \"):\n    with db() as conn:\n        conn.execute(\"UPDATE jobs SET state=?,\
+        \ error=? WHERE id=?\", (state, error, job_id))\n\n\ndef creation_calendar(event):\n\
+        \    selected = event.calendar_id or CALENDAR_ID\n    if not selected:\n \
+        \       calendars = json.loads(run_bridge(['calendars-json']))\n        if\
+        \ len(calendars) != 1:\n            raise operations.OperationError('Select\
+        \ a calendar ID; this account has multiple calendars')\n        selected =\
+        \ calendars[0]['ID']\n    return selected\n\n\ndef verify_creation(event,\
+        \ uid, selected):\n    data = operations.snapshot(run_bridge, selected, uid)\n\
+        \    expected = Calendar.from_ical(make_ics(event, uid)).walk('VEVENT')[0]\n\
+        \    items = operations.calendar_from_snapshot(data).walk('VEVENT')\n    return\
+        \ not data['unreadable_count'] and any(\n        not i.get('RECURRENCE-ID')\
+        \ and operations.verification_signature(i) == operations.verification_signature(expected)\n\
+        \        for i in items\n    )\n\n\ndef process_job(row):\n    event = EventRequest.model_validate_json(row['payload'])\n\
+        \    uid = row['id'] + '@private-proton-gpt'\n    try:\n        selected =\
+        \ creation_calendar(event)\n        run_bridge(['event', 'put', '-calendar',\
+        \ selected], make_ics(event, uid))\n        if not verify_creation(event,\
+        \ uid, selected):\n            raise BridgeError('Write was not verified')\n\
+        \    except Exception:\n        update_job(row['id'], 'unknown', 'Could not\
+        \ verify the write. Check Proton Calendar before trying again; the event may\
+        \ already exist.')\n    else:\n        update_job(row['id'], 'verified')\n\
+        \n\ndef process_operation(row):\n    payload = json.loads(row['payload'])\n\
+        \    try:\n        if payload.get('kind') == 'verify_creation':\n        \
+        \    with db() as conn:\n                job = conn.execute('SELECT * FROM\
+        \ jobs WHERE id=?', (payload['job_id'],)).fetchone()\n            event =\
+        \ EventRequest.model_validate_json(job['payload'])\n            verified =\
+        \ verify_creation(event, job['id'] + '@private-proton-gpt', creation_calendar(event))\n\
+        \            if verified:\n                update_job(job['id'], 'verified')\n\
+        \            result = {'verified': verified, 'job_id': job['id'], 'message':\
+        \ 'Read-only reconciliation; no event was written or retried.'}\n        else:\n\
+        \            result = operations.execute(operations.CalendarOperation.model_validate(payload),\
+        \ run_bridge, CALENDAR_ID)\n        state, error = 'ready', ''\n    except\
+        \ operations.MutationUncertain as exc:\n        result, state, error = {},\
+        \ 'unknown', str(exc)\n    except operations.OperationError as exc:\n    \
+        \    result, state, error = {}, 'failed', str(exc)\n    except Exception:\n\
+        \        result, state, error = {}, 'failed', 'Calendar operation failed before\
+        \ a verified result was available. Check the NAS configuration.'\n    with\
+        \ db() as conn:\n        conn.execute('UPDATE operations SET state=?, result=?,\
+        \ error=? WHERE id=?', (state, json.dumps(result), error, row['id']))\n\n\n\
+        def worker():\n    while not STOP.is_set():\n        with db() as conn:\n\
+        \            row = conn.execute(\"SELECT * FROM jobs WHERE state='pending'\
+        \ ORDER BY created LIMIT 1\").fetchone()\n            if row:\n          \
+        \      conn.execute(\"UPDATE jobs SET state='writing' WHERE id=?\", (row[\"\
+        id\"],))\n        if row:\n            process_job(row)\n        else:\n \
+        \           with db() as conn:\n                operation = conn.execute(\"\
+        SELECT * FROM operations WHERE state='pending' ORDER BY created LIMIT 1\"\
+        ).fetchone()\n                if operation:\n                    conn.execute(\"\
+        UPDATE operations SET state='running' WHERE id=?\", (operation['id'],))\n\
+        \            if operation:\n                process_operation(operation)\n\
+        \                continue\n            WAKE.wait(1)\n            WAKE.clear()\n\
+        \n\n@asynccontextmanager\nasync def lifespan(app):\n    if len(secret(\"ACTION_API_KEY\"\
+        )) < 32:\n        raise RuntimeError(\"Set ACTION_API_KEY_FILE to a secret\
+        \ containing at least 32 characters\")\n    if not secret(\"CARBONATE_BRIDGE_PASSWORD\"\
+        ):\n        raise RuntimeError(\"Configure CARBONATE_BRIDGE_PASSWORD_FILE\
+        \ after Proton login\")\n    ZoneInfo(TZ)\n    if not 1 <= DEFAULT_DURATION\
+        \ <= 10080:\n        raise RuntimeError(\"Invalid default duration\")\n  \
+        \  DATA.mkdir(mode=0o700, parents=True, exist_ok=True)\n    with db() as conn:\n\
+        \        conn.execute(\"CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY,\
+        \ payload TEXT NOT NULL, state TEXT NOT NULL, error TEXT NOT NULL DEFAULT\
+        \ '', created REAL NOT NULL)\")\n        conn.execute(\"UPDATE jobs SET state='unknown',\
+        \ error='Server restarted during the write. Check Proton Calendar; no automatic\
+        \ retry was made.' WHERE state='writing'\")\n        conn.execute(\"CREATE\
+        \ TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, payload TEXT NOT NULL,\
+        \ state TEXT NOT NULL, result TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL\
+        \ DEFAULT '', created REAL NOT NULL)\")\n        conn.execute(\"UPDATE operations\
+        \ SET state='unknown', error='Server restarted during an operation. Read Proton\
+        \ before retrying; no mutation was retried.' WHERE state='running'\")\n  \
+        \  os.chmod(DATA / \"jobs.sqlite\", 0o600)\n    STOP.clear()\n    thread =\
+        \ threading.Thread(target=worker, daemon=True)\n    thread.start()\n    yield\n\
+        \    STOP.set()\n    WAKE.set()\n    thread.join(timeout=2)\n\n\napp = FastAPI(title=\"\
+        Private Proton Calendar\", version=\"0.2.0\", lifespan=lifespan,\n       \
+        \       servers=[{\"url\": PUBLIC_URL}], docs_url=None, redoc_url=None)\n\
         bearer = HTTPBearer(auto_error=False)\n\n\ndef authorize(credentials: HTTPAuthorizationCredentials\
         \ | None = Depends(bearer)):\n    key = secret(\"ACTION_API_KEY\")\n    if\
         \ not key or not credentials or not hmac.compare_digest(credentials.credentials.encode(),\
@@ -141,62 +255,362 @@ services:
         \ date, timezone and default event duration.\"\"\"\n    return {\"now\": datetime.now(ZoneInfo(TZ)).isoformat(),\
         \ \"timezone\": TZ,\n            \"default_duration_minutes\": DEFAULT_DURATION,\n\
         \            \"provider\": \"proton\", \"login_configured\": (DATA / \"auth.json\"\
-        ).exists()}\n\n\n@app.post(\"/events\", status_code=202, dependencies=[Depends(authorize)],\n\
-        \          operation_id=\"createCalendarEvent\", response_model=EventStatus,\
-        \ openapi_extra={\"x-openai-isConsequential\": False})\ndef create_event(event:\
-        \ EventRequest):\n    \"\"\"Queue one event. Poll getEventStatus; only verified\
-        \ means saved. Identical requests reuse the same job.\"\"\"\n    if not (DATA\
-        \ / \"auth.json\").exists():\n        raise HTTPException(503, \"Proton login\
-        \ is required on the server\")\n    job_id, payload = identity(event)\n  \
-        \  with db() as conn:\n        conn.execute(\"BEGIN IMMEDIATE\")\n       \
-        \ existing = conn.execute(\"SELECT id FROM jobs WHERE id=?\", (job_id,)).fetchone()\n\
-        \        if not existing:\n            count = conn.execute(\"SELECT count(*)\
-        \ FROM jobs WHERE state IN ('pending','writing')\").fetchone()[0]\n      \
-        \      if count >= 20:\n                raise HTTPException(429, \"Queue is\
-        \ full; try later\")\n            conn.execute(\"INSERT OR IGNORE INTO jobs(id,payload,state,created)\
-        \ VALUES(?,?,'pending',?)\", (job_id, payload, time.time()))\n    WAKE.set()\n\
-        \    return get_status(job_id)\n\n\n@app.get(\"/events/{job_id}\", dependencies=[Depends(authorize)],\
-        \ operation_id=\"getEventStatus\", response_model=EventStatus)\ndef get_status(job_id:\
-        \ str):\n    \"\"\"Get event status. pending/writing are unfinished; unknown\
-        \ requires checking Proton; verified confirms read-back.\"\"\"\n    with db()\
-        \ as conn:\n        row = conn.execute(\"SELECT * FROM jobs WHERE id=?\",\
-        \ (job_id,)).fetchone()\n    if not row:\n        raise HTTPException(404,\
-        \ \"Unknown job\")\n    return {\"job_id\": row[\"id\"], \"state\": row[\"\
-        state\"], \"event\": json.loads(row[\"payload\"]),\n            \"error\"\
-        : row[\"error\"], \"calendar_url\": \"https://calendar.proton.me\",\n    \
-        \        \"poll_after_seconds\": 3 if row[\"state\"] in (\"pending\", \"writing\"\
-        ) else 0}\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE' /app/entrypoint.sh\n\
-        #!/bin/sh\nset -eu\numask 077\nif [ -f /run/secrets/bridge_password ]; then\n\
-        \    CARBONATE_BRIDGE_PASSWORD=$$(cat /run/secrets/bridge_password)\n    export\
-        \ CARBONATE_BRIDGE_PASSWORD\nfi\nexec \"$$@\"\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE'\
-        \ /app/bootstrap.py\n\"\"\"Optional TrueNAS YAML startup: create a bridge\
-        \ secret and log in once.\"\"\"\nimport os\nimport secrets\nimport subprocess\n\
-        import sys\nfrom pathlib import Path\n\n\ndef initialize_bridge(data):\n \
-        \   data.mkdir(mode=0o700, parents=True, exist_ok=True)\n    path = data /\
-        \ 'bridge_password'\n    if not path.exists():\n        with path.open('x')\
-        \ as out:\n            out.write(secrets.token_urlsafe(48) + '\\n')\n    path.chmod(0o600)\n\
-        \    os.environ['CARBONATE_BRIDGE_PASSWORD_FILE'] = str(path)\n    os.environ['CARBONATE_BRIDGE_PASSWORD']\
-        \ = path.read_text().strip()\n\n\ndef login_once(data, interactive=False):\n\
-        \    if (data / 'auth.json').exists():\n        if interactive:\n        \
-        \    print('A session already exists. Stop calendar activity before reauthentication.',\
-        \ file=sys.stderr)\n            return False\n        return True\n    username\
-        \ = os.getenv('PROTON_USERNAME', '')\n    password = os.getenv('PROTON_PASSWORD',\
-        \ '')\n    if not username or (not interactive and not password):\n      \
-        \  print('Proton login is not configured. Set PROTON_USERNAME and PROTON_PASSWORD\
-        \ in the App YAML, or use the App container Shell for interactive login.',\
-        \ file=sys.stderr)\n        return False\n    args = ['carbonate', 'auth',\
-        \ username, '-session', str(data / 'auth.json'), '-keep-bridge-password']\n\
-        \    if interactive:\n        return subprocess.run(args, check=False).returncode\
-        \ == 0\n    attempt = os.getenv('PROTON_LOGIN_ATTEMPT', '1')\n    marker =\
-        \ data / 'login_attempt'\n    if marker.exists() and marker.read_text() ==\
-        \ attempt:\n        print('No automatic login retry. Update the credentials/code\
-        \ and increment PROTON_LOGIN_ATTEMPT in the App YAML to try once again.',\
-        \ file=sys.stderr)\n        return False\n    answers = [password]\n    for\
-        \ name in ('PROTON_TWO_FACTOR_CODE', 'PROTON_MAILBOX_PASSWORD'):\n       \
-        \ if os.getenv(name):\n            answers.append(os.environ[name])\n    if\
-        \ any('\\n' in answer or '\\r' in answer for answer in answers):\n       \
-        \ print('Login answers must each be one line.', file=sys.stderr)\n       \
-        \ return False\n    marker.write_text(attempt)\n    marker.chmod(0o600)\n\
+        ).exists(),\n            \"api_version\": 2, \"selected_calendar_id\": CALENDAR_ID,\n\
+        \            \"capabilities\": ['read', 'search', 'create', 'update', 'delete',\
+        \ 'recurrence', 'device_reminders']}\n\n\n@app.post(\"/events\", status_code=202,\
+        \ dependencies=[Depends(authorize)],\n          operation_id=\"createCalendarEvent\"\
+        , response_model=EventStatus, openapi_extra={\"x-openai-isConsequential\"\
+        : False})\ndef create_event(event: EventRequest):\n    \"\"\"Queue one event.\
+        \ Poll getEventStatus; only verified means saved. Identical requests reuse\
+        \ the same job.\"\"\"\n    if not (DATA / \"auth.json\").exists():\n     \
+        \   raise HTTPException(503, \"Proton login is required on the server\")\n\
+        \    job_id, payload = identity(event)\n    with db() as conn:\n        conn.execute(\"\
+        BEGIN IMMEDIATE\")\n        existing = conn.execute(\"SELECT id FROM jobs\
+        \ WHERE id=?\", (job_id,)).fetchone()\n        if not existing:\n        \
+        \    count = conn.execute(\"SELECT count(*) FROM jobs WHERE state IN ('pending','writing')\"\
+        ).fetchone()[0]\n            if count >= 20:\n                raise HTTPException(429,\
+        \ \"Queue is full; try later\")\n            conn.execute(\"INSERT OR IGNORE\
+        \ INTO jobs(id,payload,state,created) VALUES(?,?,'pending',?)\", (job_id,\
+        \ payload, time.time()))\n    WAKE.set()\n    return get_status(job_id)\n\n\
+        \n@app.get(\"/events/{job_id}\", dependencies=[Depends(authorize)], operation_id=\"\
+        getEventStatus\", response_model=EventStatus)\ndef get_status(job_id: str):\n\
+        \    \"\"\"Get event status. pending/writing are unfinished; unknown requires\
+        \ checking Proton; verified confirms read-back.\"\"\"\n    with db() as conn:\n\
+        \        row = conn.execute(\"SELECT * FROM jobs WHERE id=?\", (job_id,)).fetchone()\n\
+        \    if not row:\n        raise HTTPException(404, \"Unknown job\")\n    return\
+        \ {\"job_id\": row[\"id\"], \"state\": row[\"state\"], \"event\": json.loads(row[\"\
+        payload\"]),\n            \"error\": row[\"error\"], \"calendar_url\": \"\
+        https://calendar.proton.me\",\n            \"poll_after_seconds\": 3 if row[\"\
+        state\"] in (\"pending\", \"writing\") else 0}\n\n\nclass OperationStatus(BaseModel):\n\
+        \    operation_id: str\n    state: str\n    result: dict\n    error: str\n\
+        \    poll_after_seconds: int\n\n\ndef queue_operation(payload, mutation=False):\n\
+        \    raw = json.dumps(payload, sort_keys=True, separators=(',', ':'))\n  \
+        \  operation_id = hashlib.sha256(raw.encode()).hexdigest() if mutation else\
+        \ uuid.uuid4().hex\n    with db() as conn:\n        conn.execute('BEGIN IMMEDIATE')\n\
+        \        if not conn.execute('SELECT id FROM operations WHERE id=?', (operation_id,)).fetchone():\n\
+        \            count = conn.execute(\"SELECT count(*) FROM operations WHERE\
+        \ state IN ('pending','running')\").fetchone()[0]\n            if count >=\
+        \ 20:\n                raise HTTPException(429, 'Calendar operation queue\
+        \ is full')\n            conn.execute(\"INSERT INTO operations(id,payload,state,created)\
+        \ VALUES(?,?,'pending',?)\", (operation_id, raw, time.time()))\n    WAKE.set()\n\
+        \    return operation_status(operation_id)\n\n\n@app.post('/operations', status_code=202,\
+        \ dependencies=[Depends(authorize)], response_model=OperationStatus)\ndef\
+        \ start_operation(operation: operations.CalendarOperation):\n    if not (DATA\
+        \ / 'auth.json').exists():\n        raise HTTPException(503, 'Proton login\
+        \ is required on the server')\n    return queue_operation(operation.model_dump(mode='json'),\
+        \ operation.kind in ('update_event', 'delete_event'))\n\n\n@app.get('/operations/{operation_id}',\
+        \ dependencies=[Depends(authorize)], response_model=OperationStatus)\ndef\
+        \ operation_status(operation_id: str):\n    with db() as conn:\n        row\
+        \ = conn.execute('SELECT * FROM operations WHERE id=?', (operation_id,)).fetchone()\n\
+        \    if not row:\n        raise HTTPException(404, 'Unknown calendar operation')\n\
+        \    return {'operation_id': row['id'], 'state': row['state'], 'result': json.loads(row['result']),\n\
+        \            'error': row['error'], 'poll_after_seconds': 3 if row['state']\
+        \ in ('pending', 'running') else 0}\n\n\n@app.post('/events/{job_id}/verify',\
+        \ status_code=202, dependencies=[Depends(authorize)], response_model=OperationStatus)\n\
+        def reconcile_creation(job_id: str):\n    get_status(job_id)\n    return queue_operation({'kind':\
+        \ 'verify_creation', 'job_id': job_id})\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE'\
+        \ /app/calendar_operations.py\n\"\"\"Calendar queries and deliberate mutations\
+        \ of existing events.\n\nKeep the iCalendar object when editing: reconstructing\
+        \ only title/time would\nsilently discard reminders, recurrence exceptions\
+        \ and provider properties.\n\"\"\"\nimport copy\nimport hashlib\nimport json\n\
+        from datetime import date, datetime, timedelta, timezone\nfrom typing import\
+        \ Literal\nfrom zoneinfo import ZoneInfo\n\nimport recurring_ical_events\n\
+        from icalendar import Alarm, Calendar\nfrom pydantic import BaseModel, ConfigDict,\
+        \ Field, field_validator, model_validator\n\nCALENDAR_PATTERN = r'^[A-Za-z0-9][A-Za-z0-9_+=-]{0,511}$$'\n\
+        \n\nclass OperationError(Exception):\n    \"\"\"A safe error raised before\
+        \ an existing event is mutated.\"\"\"\n\n\nclass MutationUncertain(Exception):\n\
+        \    pass\n\n\nclass Recurrence(BaseModel):\n    model_config = ConfigDict(extra='forbid')\n\
+        \    frequency: Literal['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY']\n    interval:\
+        \ int = Field(default=1, ge=1, le=52)\n    count: int | None = Field(default=None,\
+        \ ge=1, le=1000)\n    until: datetime | None = None\n    weekdays: list[Literal['MO',\
+        \ 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']] = Field(default_factory=list, max_length=7)\n\
+        \n    @model_validator(mode='after')\n    def validate_rule(self):\n     \
+        \   if self.count is not None and self.until is not None:\n            raise\
+        \ ValueError('Choose count or until, not both')\n        if self.until is\
+        \ not None and self.until.utcoffset() is None:\n            raise ValueError('until\
+        \ requires a UTC offset')\n        self.weekdays = sorted(set(self.weekdays))\n\
+        \        return self\n\n\ndef rule_value(recurrence):\n    rule = {'freq':\
+        \ recurrence.frequency, 'interval': recurrence.interval}\n    if recurrence.count\
+        \ is not None:\n        rule['count'] = recurrence.count\n    if recurrence.until\
+        \ is not None:\n        rule['until'] = recurrence.until.astimezone(timezone.utc)\n\
+        \    if recurrence.weekdays:\n        rule['byday'] = recurrence.weekdays\n\
+        \    return rule\n\n\ndef reminders(item, minutes):\n    item.subcomponents\
+        \ = [c for c in item.subcomponents if c.name != 'VALARM']\n    for value in\
+        \ sorted(set(minutes)):\n        alarm = Alarm()\n        alarm.add('action',\
+        \ 'DISPLAY')\n        alarm.add('trigger', -timedelta(minutes=value))\n  \
+        \      alarm.add('description', str(item.get('SUMMARY', 'Reminder')))\n  \
+        \      item.add_component(alarm)\n\n\ndef moment(value):\n    if isinstance(value,\
+        \ datetime):\n        if value.utcoffset() is None:\n            raise OperationError('A\
+        \ calendar event has an unresolved timezone')\n        return value.astimezone(timezone.utc)\n\
+        \    return datetime.combine(value, datetime.min.time(), timezone.utc)\n\n\
+        \ndef event_end(item):\n    start = item.decoded('DTSTART')\n    return item.decoded('DTEND',\
+        \ start + item.decoded('DURATION', timedelta(days=1) if not isinstance(start,\
+        \ datetime) else timedelta(0)))\n\n\ndef time_value(value):\n    return value.isoformat()\n\
+        \n\ndef calendar_from_snapshot(snapshot):\n    cal = Calendar()\n    cal.add('version',\
+        \ '2.0')\n    cal.add('prodid', '-//Private Proton Calendar//EN')\n    for\
+        \ record in snapshot['events']:\n        for item in Calendar.from_ical(record['ics']).walk('VEVENT'):\n\
+        \            cal.add_component(item)\n    cal.subcomponents.sort(key=lambda\
+        \ item: (str(item.get('UID', '')), str(item.get('RECURRENCE-ID', ''))))\n\
+        \    return cal\n\n\ndef snapshot(bridge, calendar_id, uid=None):\n    args\
+        \ = ['events-json', '-calendar', calendar_id]\n    if uid:\n        args +=\
+        \ ['-uid', uid]\n    try:\n        value = json.loads(bridge(args))\n    \
+        \    if value['calendar_id'] != calendar_id or not isinstance(value['events'],\
+        \ list):\n            raise ValueError('Invalid snapshot')\n        return\
+        \ value\n    except Exception as exc:\n        raise OperationError('Calendar\
+        \ could not be read. Check the NAS login and bridge configuration.') from\
+        \ exc\n\n\ndef revision(cal):\n    return hashlib.sha256(cal.to_ical()).hexdigest()\n\
+        \n\ndef event_view(item, calendar_id, rev):\n    start = item.decoded('DTSTART')\n\
+        \    end = event_end(item)\n    trigger_values = []\n    for alarm in item.walk('VALARM'):\n\
+        \        trigger = alarm.decoded('TRIGGER', None)\n        if isinstance(trigger,\
+        \ timedelta):\n            trigger_values.append({'action': str(alarm.get('ACTION',\
+        \ 'DISPLAY')), 'minutes_before': -int(trigger.total_seconds() / 60)})\n  \
+        \  rid = item.decoded('RECURRENCE-ID', None)\n    return {'calendar_id': calendar_id,\
+        \ 'uid': str(item['UID']), 'revision': rev,\n            'title': str(item.get('SUMMARY',\
+        \ '')), 'start': time_value(start), 'end': time_value(end),\n            'all_day':\
+        \ not isinstance(start, datetime), 'location': str(item.get('LOCATION', '')),\n\
+        \            'description': str(item.get('DESCRIPTION', '')), 'recurrence':\
+        \ item.get('RRULE').to_ical().decode() if item.get('RRULE') else None,\n \
+        \           'recurrence_id': time_value(rid) if rid is not None else None,\
+        \ 'reminders': trigger_values,\n            'has_attendees': bool(item.get('ATTENDEE'))}\n\
+        \n\nclass CalendarOperation(BaseModel):\n    model_config = ConfigDict(extra='forbid')\n\
+        \    kind: Literal['list_calendars', 'list_events', 'get_event', 'update_event',\
+        \ 'delete_event']\n    calendar_id: str | None = Field(default=None, pattern=CALENDAR_PATTERN)\n\
+        \    uid: str | None = Field(default=None, min_length=1, max_length=512)\n\
+        \    start: datetime | None = None\n    end: datetime | None = None\n    query:\
+        \ str = Field(default='', max_length=200)\n    limit: int = Field(default=50,\
+        \ ge=1, le=200)\n    offset: int = Field(default=0, ge=0, le=10000)\n    expected_revision:\
+        \ str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$$')\n    scope:\
+        \ Literal['event', 'series', 'occurrence'] = 'event'\n    recurrence_id: datetime\
+        \ | date | None = None\n    changes: dict | None = None\n\n    @field_validator('recurrence_id',\
+        \ mode='before')\n    @classmethod\n    def distinguish_dates(cls, value):\n\
+        \        if isinstance(value, str) and len(value) == 10:\n            return\
+        \ date.fromisoformat(value)\n        return value\n\n    @model_validator(mode='after')\n\
+        \    def check_request(self):\n        if self.uid and any(ord(c) < 32 for\
+        \ c in self.uid):\n            raise ValueError('Invalid event UID')\n   \
+        \     if self.kind != 'list_calendars' and self.kind != 'list_events' and\
+        \ not self.uid:\n            raise ValueError('An event UID from a calendar\
+        \ read is required')\n        if self.kind == 'list_events':\n           \
+        \ if not self.start or not self.end or self.start.utcoffset() is None or self.end.utcoffset()\
+        \ is None:\n                raise ValueError('Date range requires explicit\
+        \ offsets')\n            if not timedelta(0) < self.end - self.start <= timedelta(days=366):\n\
+        \                raise ValueError('Read at most 366 days per request')\n \
+        \       if self.kind in ('update_event', 'delete_event'):\n            if\
+        \ not self.expected_revision:\n                raise ValueError('Read the\
+        \ event first and supply its revision')\n            if self.scope == 'occurrence'\
+        \ and self.recurrence_id is None:\n                raise ValueError('Specify\
+        \ which occurrence to change')\n            if isinstance(self.recurrence_id,\
+        \ datetime) and self.recurrence_id.utcoffset() is None:\n                raise\
+        \ ValueError('Occurrence time requires an offset')\n        if self.kind ==\
+        \ 'update_event':\n            if not self.changes:\n                raise\
+        \ ValueError('At least one change is required')\n            allowed = {'title',\
+        \ 'start', 'end', 'location', 'description', 'recurrence', 'reminders_minutes',\
+        \ 'recurrence_timezone'}\n            if set(self.changes) - allowed:\n  \
+        \              raise ValueError('Unsupported event changes')\n           \
+        \ for name, maximum in [('title', 200), ('location', 300), ('description',\
+        \ 2000)]:\n                if name in self.changes:\n                    value\
+        \ = self.changes[name]\n                    if not isinstance(value, str)\
+        \ or len(value) > maximum or (name == 'title' and not value.strip()) or any(ord(c)\
+        \ < 32 and c not in '\\n\\t' for c in value):\n                        raise\
+        \ ValueError('Invalid event text')\n            if 'recurrence' in self.changes\
+        \ and self.changes['recurrence'] is not None:\n                Recurrence.model_validate(self.changes['recurrence'])\n\
+        \            if 'recurrence_timezone' in self.changes:\n                try:\n\
+        \                    ZoneInfo(self.changes['recurrence_timezone'])\n     \
+        \           except (KeyError, ValueError, TypeError):\n                  \
+        \  raise ValueError('Use a valid IANA recurrence timezone')\n            if\
+        \ 'reminders_minutes' in self.changes:\n                values = self.changes['reminders_minutes']\n\
+        \                if not isinstance(values, list) or len(values) > 5 or any(type(v)\
+        \ is not int or not 0 <= v <= 10080 for v in values):\n                  \
+        \  raise ValueError('Use at most five device reminders within seven days')\n\
+        \        return self\n\n\ndef occurrences(cal, start, end):\n    for item\
+        \ in cal.walk('VEVENT'):\n        rule = item.get('RRULE')\n        if rule\
+        \ and str(rule.get('FREQ', [''])[0]) not in ('DAILY', 'WEEKLY', 'MONTHLY',\
+        \ 'YEARLY'):\n            raise OperationError('Sub-daily recurring events\
+        \ must be read in Proton')\n    try:\n        return [i for i in recurring_ical_events.of(cal).between(start,\
+        \ end) if str(i.get('STATUS', '')).upper() != 'CANCELLED']\n    except Exception\
+        \ as exc:\n        raise OperationError('This recurrence could not be interpreted\
+        \ safely') from exc\n\n\ndef selected_occurrence(cal, value):\n    point =\
+        \ moment(value)\n    # Moved exceptions are found by original recurrence ID,\
+        \ even when their\n    # current start falls outside the original occurrence\
+        \ window.\n    for item in cal.walk('VEVENT'):\n        rid = item.decoded('RECURRENCE-ID',\
+        \ None)\n        if rid is not None and moment(rid) == point:\n          \
+        \  return copy.deepcopy(item)\n    items = occurrences(cal, point, point +\
+        \ timedelta(seconds=1))\n    for item in items:\n        rid = item.decoded('RECURRENCE-ID',\
+        \ item.decoded('DTSTART'))\n        if moment(rid) == point:\n           \
+        \ return copy.deepcopy(item)\n    raise OperationError('The selected recurrence\
+        \ occurrence was not found')\n\n\ndef update_component(item, changes):\n \
+        \   old_start = item.decoded('DTSTART')\n    old_end = event_end(item)\n \
+        \   full_day = not isinstance(old_start, datetime)\n    for name in ('start',\
+        \ 'end'):\n        if name in changes:\n            try:\n               \
+        \ value = date.fromisoformat(changes[name]) if full_day else datetime.fromisoformat(changes[name])\n\
+        \                if isinstance(value, datetime) and value.utcoffset() is None:\n\
+        \                    raise ValueError('Offset required')\n            except\
+        \ (ValueError, TypeError) as exc:\n                raise OperationError('Use\
+        \ dates for all-day events and explicit offsets for timed events') from exc\n\
+        \            item['DTSTART' if name == 'start' else 'DTEND'] = value\n   \
+        \ # Assign via add(), rather than a raw datetime, to retain typed iCalendar\
+        \ values.\n    for name in ('DTSTART', 'DTEND'):\n        value = item.get(name)\n\
+        \        if isinstance(value, (datetime, date)):\n            del item[name]\n\
+        \            item.add(name, value.astimezone(timezone.utc) if isinstance(value,\
+        \ datetime) and not getattr(value.tzinfo, 'key', None) else value)\n    if\
+        \ 'start' in changes and 'end' not in changes:\n        if 'DTEND' in item:\n\
+        \            del item['DTEND']\n        item.add('dtend', item.decoded('DTSTART')\
+        \ + (old_end - old_start))\n    if any(k in changes for k in ('start', 'end'))\
+        \ and 'DURATION' in item:\n        del item['DURATION']\n    start, end =\
+        \ item.decoded('DTSTART'), item.decoded('DTEND', old_end)\n    if moment(end)\
+        \ <= moment(start) or moment(end) - moment(start) > timedelta(days=7):\n \
+        \       raise OperationError('End must follow start within seven days')\n\
+        \    if item.get('RRULE') and isinstance(start, datetime):\n        zone =\
+        \ changes.get('recurrence_timezone') or getattr(old_start.tzinfo, 'key', None)\n\
+        \        if not zone and any(name in changes for name in ('start', 'end')):\n\
+        \            raise OperationError('Set recurrence_timezone when rescheduling\
+        \ a recurring series')\n        if zone:\n            for name in ('DTSTART',\
+        \ 'DTEND'):\n                value = item.decoded(name).astimezone(ZoneInfo(zone))\n\
+        \                del item[name]\n                item.add(name, value)\n \
+        \   for field, prop in [('title', 'SUMMARY'), ('location', 'LOCATION'), ('description',\
+        \ 'DESCRIPTION')]:\n        if field in changes:\n            if prop in item:\n\
+        \                del item[prop]\n            item.add(prop, changes[field].strip())\n\
+        \    if 'recurrence' in changes:\n        if 'RRULE' in item:\n          \
+        \  del item['RRULE']\n        if changes['recurrence'] is not None:\n    \
+        \        if not full_day and 'recurrence_timezone' not in changes and not\
+        \ getattr(old_start.tzinfo, 'key', None):\n                raise OperationError('Set\
+        \ recurrence_timezone for a new recurring series')\n            rule = Recurrence.model_validate(changes['recurrence'])\n\
+        \            if full_day and rule.until is not None:\n                raise\
+        \ OperationError('For all-day recurrences use count instead of until')\n \
+        \           if rule.until is not None and rule.until < moment(start):\n  \
+        \              raise OperationError('Recurrence until must follow the series\
+        \ start')\n            item.add('rrule', rule_value(rule))\n            if\
+        \ not full_day:\n                zone = changes.get('recurrence_timezone')\
+        \ or old_start.tzinfo.key\n                for name in ('DTSTART', 'DTEND'):\n\
+        \                    value = item.decoded(name).astimezone(ZoneInfo(zone))\n\
+        \                    del item[name]\n                    item.add(name, value)\n\
+        \    if 'reminders_minutes' in changes:\n        reminders(item, changes['reminders_minutes'])\n\
+        \    if 'DTSTAMP' in item:\n        del item['DTSTAMP']\n    item.add('dtstamp',\
+        \ datetime.now(timezone.utc))\n    return item\n\n\ndef verification_signature(item):\n\
+        \    # Proton can add organizer/status/sequence metadata. Verify the fields\
+        \ under\n    # our control, including alarms and recurrence/exclusions, rather\
+        \ than bytes.\n    names = ['UID', 'SUMMARY', 'DTSTART', 'DTEND', 'LOCATION',\
+        \ 'DESCRIPTION', 'RRULE', 'RECURRENCE-ID', 'EXDATE', 'RDATE']\n    result\
+        \ = {}\n    for name in names:\n        value = item.get(name)\n        if\
+        \ name in ('DTSTART', 'DTEND', 'RECURRENCE-ID') and value is not None:\n \
+        \           decoded = item.decoded(name)\n            result[name] = moment(decoded).isoformat()\
+        \ if isinstance(decoded, datetime) else decoded.isoformat()\n        elif\
+        \ value is not None and not (name in ('LOCATION', 'DESCRIPTION') and not str(value)):\n\
+        \            values = value if isinstance(value, list) else [value]\n    \
+        \        result[name] = sorted(v.to_ical().decode() for v in values)\n   \
+        \ result['alarms'] = sorted((str(a.get('ACTION', 'DISPLAY')), a.get('TRIGGER').to_ical().decode())\
+        \ for a in item.walk('VALARM') if a.get('TRIGGER'))\n    return result\n\n\
+        \ndef execute(operation, bridge, default_calendar):\n    if operation.kind\
+        \ == 'list_calendars':\n        try:\n            values = json.loads(bridge(['calendars-json']))\n\
+        \            return {'calendars': [{'calendar_id': c['ID'], 'name': c['Name'],\
+        \ 'default': c['ID'] == default_calendar} for c in values]}\n        except\
+        \ Exception as exc:\n            raise OperationError('Calendar list could\
+        \ not be read') from exc\n    calendar_id = operation.calendar_id or default_calendar\n\
+        \    if not calendar_id:\n        raise OperationError('Select a calendar\
+        \ ID before reading or writing')\n    data = snapshot(bridge, calendar_id,\
+        \ operation.uid)\n    cal = calendar_from_snapshot(data)\n    rev = revision(cal)\n\
+        \    items = cal.walk('VEVENT')\n    if operation.kind == 'list_events':\n\
+        \        results = occurrences(cal, operation.start, operation.end)\n    \
+        \    results = [i for i in results if operation.query.casefold() in '\\n'.join(str(i.get(k,\
+        \ '')) for k in ('SUMMARY', 'LOCATION', 'DESCRIPTION')).casefold()]\n    \
+        \    results.sort(key=lambda i: (moment(i.decoded('DTSTART')), str(i['UID'])))\n\
+        \        views = [event_view(i, calendar_id, '') for i in results[operation.offset:operation.offset\
+        \ + operation.limit]]\n        return {'events': views, 'next_offset': operation.offset\
+        \ + len(views) if operation.offset + len(views) < len(results) else None,\n\
+        \                'unreadable_count': data['unreadable_count'], 'message':\
+        \ 'Read getCalendarEvent before editing; listings do not carry a mutation\
+        \ revision.'}\n    if data['unreadable_count']:\n        raise OperationError('This\
+        \ event could not be decrypted; no mutation was attempted')\n    if not items:\n\
+        \        raise OperationError('Event not found in the selected calendar')\n\
+        \    if operation.kind == 'get_event':\n        return {'events': [event_view(i,\
+        \ calendar_id, rev) for i in items], 'revision': rev,\n                'unverified_signature':\
+        \ any(r['unverified'] for r in data['events'])}\n    if any(r['unverified']\
+        \ for r in data['events']):\n        raise OperationError('Event signature\
+        \ could not be verified; inspect it in Proton before changing it')\n    if\
+        \ operation.expected_revision != rev:\n        raise OperationError('Event\
+        \ changed since it was read. Read it again before editing or deleting')\n\
+        \    if any(i.get('ATTENDEE') for i in items):\n        raise OperationError('Attendee\
+        \ events are read-only in this version; invitations are not enabled')\n  \
+        \  master = next((i for i in items if not i.get('RECURRENCE-ID')), None)\n\
+        \    recurring = master is not None and bool(master.get('RRULE') or master.get('RDATE'))\n\
+        \    if recurring and operation.scope == 'event':\n        raise OperationError('Choose\
+        \ series or occurrence for a recurring event')\n    if not recurring and operation.scope\
+        \ != 'event':\n        raise OperationError('This is an individual event,\
+        \ not a recurring series')\n    if operation.scope == 'series' and operation.kind\
+        \ == 'update_event' and len(items) > 1 and any(k in operation.changes for\
+        \ k in ('start', 'end', 'recurrence')):\n        raise OperationError('Rescheduling\
+        \ a series with existing exceptions requires manual review in Proton')\n \
+        \   expected = None\n    if operation.scope == 'occurrence':\n        target\
+        \ = selected_occurrence(cal, operation.recurrence_id)\n        for key in\
+        \ ('RRULE', 'RDATE', 'EXDATE'):\n            if key in target:\n         \
+        \       del target[key]\n        if operation.kind == 'delete_event':\n  \
+        \          # Cancel this instance as an exception; do not delete the master\
+        \ UID.\n            if 'STATUS' in target:\n                del target['STATUS']\n\
+        \            target.add('status', 'CANCELLED')\n        else:\n          \
+        \  if 'recurrence' in operation.changes:\n                raise OperationError('An\
+        \ occurrence cannot change the series recurrence')\n            target = update_component(target,\
+        \ operation.changes)\n        if not target.get('RECURRENCE-ID'):\n      \
+        \      target.add('recurrence-id', target.decoded('DTSTART'))\n        write_cal\
+        \ = Calendar()\n        write_cal.add('version', '2.0')\n        write_cal.add('prodid',\
+        \ '-//Private Proton Calendar//EN')\n        write_cal.add_component(target)\n\
+        \        expected = target\n    elif operation.kind == 'update_event':\n \
+        \       target = master or items[0]\n        update_component(target, operation.changes)\n\
+        \        if operation.scope == 'series':\n            shared_changes = {k:v\
+        \ for k,v in operation.changes.items() if k in ('title', 'location', 'description',\
+        \ 'reminders_minutes')}\n            for item in items:\n                if\
+        \ item is not target and shared_changes:\n                    update_component(item,\
+        \ shared_changes)\n        write_cal = cal\n        expected = target\n  \
+        \  expected_items = [expected] if operation.scope == 'occurrence' else (write_cal.walk('VEVENT')\
+        \ if operation.kind == 'update_event' else [])\n    try:\n        if operation.kind\
+        \ == 'delete_event' and operation.scope != 'occurrence':\n            bridge(['event',\
+        \ 'delete', '-calendar', calendar_id, '-uid', operation.uid])\n        else:\n\
+        \            bridge(['event', 'put', '-calendar', calendar_id], write_cal.to_ical())\n\
+        \        after = snapshot(bridge, calendar_id, operation.uid)\n        if\
+        \ after['unreadable_count']:\n            raise ValueError('Unreadable verification')\n\
+        \        remaining = calendar_from_snapshot(after).walk('VEVENT')\n      \
+        \  if operation.kind == 'delete_event' and operation.scope != 'occurrence':\n\
+        \            verified = not remaining\n        else:\n            rid = expected.decoded('RECURRENCE-ID',\
+        \ None)\n            actual = next((i for i in remaining if i.decoded('RECURRENCE-ID',\
+        \ None) == rid), None)\n            verified = all(any(i.decoded('RECURRENCE-ID',\
+        \ None) == expected_item.decoded('RECURRENCE-ID', None) and verification_signature(i)\
+        \ == verification_signature(expected_item) for i in remaining) for expected_item\
+        \ in expected_items)\n            if operation.kind == 'delete_event':\n \
+        \               verified = verified and str(actual.get('STATUS', '')) == 'CANCELLED'\n\
+        \        if not verified:\n            raise ValueError('Verification mismatch')\n\
+        \    except Exception as exc:\n        raise MutationUncertain('Mutation could\
+        \ not be verified. Check Proton before attempting another mutation.') from\
+        \ exc\n    return {'verified': True, 'calendar_id': calendar_id, 'uid': operation.uid,\
+        \ 'scope': operation.scope, 'operation': operation.kind}\n\nCALENDAR_SOURCE\n\
+        COPY <<'CALENDAR_SOURCE' /app/entrypoint.sh\n#!/bin/sh\nset -eu\numask 077\n\
+        if [ -f /run/secrets/bridge_password ]; then\n    CARBONATE_BRIDGE_PASSWORD=$$(cat\
+        \ /run/secrets/bridge_password)\n    export CARBONATE_BRIDGE_PASSWORD\nfi\n\
+        exec \"$$@\"\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE' /app/bootstrap.py\n\
+        \"\"\"Optional TrueNAS YAML startup: create a bridge secret and log in once.\"\
+        \"\"\nimport os\nimport secrets\nimport subprocess\nimport sys\nfrom pathlib\
+        \ import Path\n\n\ndef initialize_bridge(data):\n    data.mkdir(mode=0o700,\
+        \ parents=True, exist_ok=True)\n    path = data / 'bridge_password'\n    if\
+        \ not path.exists():\n        with path.open('x') as out:\n            out.write(secrets.token_urlsafe(48)\
+        \ + '\\n')\n    path.chmod(0o600)\n    os.environ['CARBONATE_BRIDGE_PASSWORD_FILE']\
+        \ = str(path)\n    os.environ['CARBONATE_BRIDGE_PASSWORD'] = path.read_text().strip()\n\
+        \n\ndef login_once(data, interactive=False):\n    if (data / 'auth.json').exists():\n\
+        \        if interactive:\n            print('A session already exists. Stop\
+        \ calendar activity before reauthentication.', file=sys.stderr)\n        \
+        \    return False\n        return True\n    username = os.getenv('PROTON_USERNAME',\
+        \ '')\n    password = os.getenv('PROTON_PASSWORD', '')\n    if not username\
+        \ or (not interactive and not password):\n        print('Proton login is not\
+        \ configured. Set PROTON_USERNAME and PROTON_PASSWORD in the App YAML, or\
+        \ use the App container Shell for interactive login.', file=sys.stderr)\n\
+        \        return False\n    args = ['carbonate', 'auth', username, '-session',\
+        \ str(data / 'auth.json'), '-keep-bridge-password']\n    if interactive:\n\
+        \        return subprocess.run(args, check=False).returncode == 0\n    attempt\
+        \ = os.getenv('PROTON_LOGIN_ATTEMPT', '1')\n    marker = data / 'login_attempt'\n\
+        \    if marker.exists() and marker.read_text() == attempt:\n        print('No\
+        \ automatic login retry. Update the credentials/code and increment PROTON_LOGIN_ATTEMPT\
+        \ in the App YAML to try once again.', file=sys.stderr)\n        return False\n\
+        \    answers = [password]\n    for name in ('PROTON_TWO_FACTOR_CODE', 'PROTON_MAILBOX_PASSWORD'):\n\
+        \        if os.getenv(name):\n            answers.append(os.environ[name])\n\
+        \    if any('\\n' in answer or '\\r' in answer for answer in answers):\n \
+        \       print('Login answers must each be one line.', file=sys.stderr)\n \
+        \       return False\n    marker.write_text(attempt)\n    marker.chmod(0o600)\n\
         \    try:\n        # Keep login output and credentials out of App logs; manual\
         \ challenges\n        # can be handled interactively in the browser's container\
         \ Shell.\n        result = subprocess.run(args + ['-password-stdin'], input=('\\\
@@ -221,6 +635,7 @@ services:
         EXPOSE 8000\nENTRYPOINT [\"/app/entrypoint.sh\"]\nCMD [\"uvicorn\", \"app:app\"\
         , \"--host\", \"0.0.0.0\", \"--port\", \"8000\", \"--workers\", \"1\", \"\
         --no-access-log\"]\n"
+    pull_policy: build
     restart: unless-stopped
     init: true
     environment:
