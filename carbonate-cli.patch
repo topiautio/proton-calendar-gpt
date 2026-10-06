@@ -10,7 +10,7 @@
  			continue
 --- a/cmd/carbonate/main.go
 +++ b/cmd/carbonate/main.go
-@@ -57,6 +57,10 @@
+@@ -57,6 +57,12 @@
  		return cmdServe(ctx, args[1:], out)
  	case "calendars":
  		return cmdCalendars(ctx, args[1:], out)
@@ -18,6 +18,36 @@
 +		return cmdCalendarJSON(ctx, args[1:], out, false)
 +	case "events-json":
 +		return cmdCalendarJSON(ctx, args[1:], out, true)
++	case "delete-occurrence":
++		return cmdDeleteOccurrence(ctx, args[1:], out)
  	case "event":
  		return cmdEvent(ctx, args[1:], out)
  	case "contacts":
+--- a/internal/calendar/write.go
++++ b/internal/calendar/write.go
+@@ -361,6 +361,9 @@
+ 	for i := range components {
+ 		event := &components[i]
+ 
++		if event.Props.Get("RECURRENCE-ID") != nil && recurrenceIDOf(event) == 0 {
++			return nil, fmt.Errorf("invalid or unsupported RECURRENCE-ID")
++		}
+ 		if recurrenceIDOf(event) == 0 {
+ 			series = append(series, event)
+ 
+@@ -701,12 +704,9 @@
+ 		return 0
+ 	}
+ 
+-	when, err := time.Parse("20060102T150405Z", strings.TrimSpace(prop.Value))
+-	if err != nil {
+-		// Also accept a date-only value, which a full-day series uses.
+-		if when, err = time.Parse("20060102", strings.TrimSpace(prop.Value)); err != nil {
+-			return 0
+-		}
++	when, err := prop.DateTime(time.UTC)
++	if err != nil {
++		return 0
+ 	}
+ 
+ 	return when.Unix()

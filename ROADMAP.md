@@ -25,10 +25,14 @@ weekly creation across DST, and individual/series deletion. All disposable test
 events were removed and Test 2 remains unchanged.
 
 Single-occurrence editing remains unverified; fresh reads showed no exception and
-the original master unchanged. Adapter 0.2.2 adds an exception sequence correction
-and safe diagnostics, with 38 Python tests passing and a successful Docker build.
-It still needs a NAS rebuild and live occurrence edit/cancel tests. Whole-series
-reminder changes and ChatGPT mutation flows also need live acceptance. See
+the original master unchanged. Adapter 0.2.2 reported Proton rejection code 2001.
+The tested 0.2.3 source preserves parent recurrence timezones and cancels with an
+EXDATE plus targeted exception deletion. Its 39 Python tests, Go calendar/CLI
+tests, and Docker build pass. Deployment is blocked by the TrueNAS browser
+session ending during Save; the new source did not persist. Whole-series reminder
+changes have passed adapter read-back. ChatGPT's six-poll limit stops some slow
+operations before completion and needs workflow refinement. Occurrence edits,
+cancellation and delivered reminders still need live acceptance. See
 ACCEPTANCE.md for the precise checkpoint.
 
 Local tests do not establish live Proton compatibility. Completion requires live

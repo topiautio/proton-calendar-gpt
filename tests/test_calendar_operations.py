@@ -36,13 +36,18 @@ class Bridge:
         if args[:2] == ['event', 'put']:
             for item in Calendar.from_ical(content).walk('VEVENT'):
                 if item.get('RECURRENCE-ID') and isinstance(item.decoded('RECURRENCE-ID'), datetime):
-                    assert item['RECURRENCE-ID'].to_ical().decode().endswith('Z'), 'Bridge identifies only UTC recurrence IDs'
+                    master = next(e for e in self.events if not e.get('RECURRENCE-ID'))
+                    assert item['RECURRENCE-ID'].params.get('TZID') == master['DTSTART'].params.get('TZID'), 'Exception must retain parent timezone'
                 self.events = [e for e in self.events if not (e['UID'] == item['UID'] and e.get('RECURRENCE-ID') == item.get('RECURRENCE-ID'))]
                 self.events.append(item)
             return 'saved'
         if args[:2] == ['event', 'delete']:
             self.events = []
             return 'deleted'
+        if args[0] == 'delete-occurrence':
+            rid = int(args[args.index('-recurrence-id') + 1])
+            self.events = [e for e in self.events if not (e.get('RECURRENCE-ID') and int(ops.moment(e.decoded('RECURRENCE-ID')).timestamp()) == rid)]
+            return '{"deleted":true}'
         raise AssertionError(args)
 
 
@@ -148,6 +153,19 @@ def test_series_reminder_changes_apply_to_exceptions():
     change(bridge, {'title':'Exception'}, scope='occurrence', recurrence_id='2026-10-26T09:00:00+02:00')
     change(bridge, {'reminders_minutes':[30]}, scope='series')
     assert all(ops.event_view(e, CAL, '')['reminders'][0]['minutes_before'] == 30 for e in bridge.events)
+
+
+def test_occurrence_cancel_excludes_parent_and_preserves_other_exception():
+    bridge = Bridge(sample(recurrence={'frequency': 'WEEKLY', 'count': 3}, recurrence_timezone='Europe/Helsinki'))
+    change(bridge, {'title': 'Keep this exception'}, scope='occurrence', recurrence_id='2026-11-02T09:00:00+02:00')
+    change(bridge, {'title': 'Cancel this exception'}, scope='occurrence', recurrence_id='2026-10-26T09:00:00+02:00')
+    run(bridge, 'delete_event', uid='fixture@calendar', expected_revision=read(bridge)['revision'], scope='occurrence', recurrence_id='2026-10-26T09:00:00+02:00')
+    master = next(e for e in bridge.events if not e.get('RECURRENCE-ID'))
+    assert master.get('RRULE') and master.get('EXDATE')
+    assert any(str(e['SUMMARY']) == 'Keep this exception' for e in bridge.events)
+    assert not any(a[:2] == ['event', 'delete'] for a, _ in bridge.calls)
+    results = run(bridge, 'list_events', start='2026-10-18T00:00:00Z', end='2026-11-03T00:00:00Z')['events']
+    assert len(results) == 2 and results[1]['title'] == 'Keep this exception'
 
 
 def test_delete_series_verified_and_readback_failure_is_uncertain():

@@ -40,7 +40,7 @@ a fake bridge and cannot establish live compatibility or delivered notifications
 
 ## Checkpoint: 6 October 2026
 
-TrueNAS runs adapter 0.2.1. Reconnecting the ChatGPT plugin resolved its stale
+TrueNAS runs adapter 0.2.2. Reconnecting the ChatGPT plugin resolved its stale
 tool catalog. A read-only check in regular ChatGPT successfully used
 `listCalendars`, `listCalendarEvents`, `getCalendarEvent` and
 `getCalendarOperationStatus`: all three calendars were returned, Kalenteri was
@@ -58,12 +58,30 @@ Authenticated adapter acceptance checks passed:
 - Verified deletion of all disposable acceptance events, including both whole
   recurring series. Test 2 was preserved.
 
-Single-occurrence editing returned `unknown` on two disposable series. Fresh
+Regular ChatGPT also created and read a disposable two-occurrence weekly series
+with a 15-minute reminder. Its whole-series title/reminder edit reached verified
+status on the adapter and a fresh read showed 45-minute reminders on both dates.
+ChatGPT stopped polling after its six-check limit; the adapter continued the
+operation. The disposable series was subsequently deleted with verified status
+through the adapter. This polling limit needs further workflow testing.
+
+Single-occurrence editing returned `unknown` on three disposable series. Fresh
 reads confirmed their masters unchanged, with no saved exception. No uncertain
 write was automatically retried. Occurrence cancellation and reminder edits
-across existing exceptions have not passed live acceptance. The source for
-adapter 0.2.2 advances new exception sequences beyond the parent and exposes only
-fixed failure labels/numeric provider codes, never raw upstream error text.
-Its 38 Python tests and Docker build pass; the generated inline YAML also builds. It awaits
-deployment and live recurrence acceptance. Plugin mutation flows and actual
-notification delivery also require end-to-end confirmation.
+across existing exceptions have not passed live acceptance. Adapter 0.2.2 exposed
+Proton rejection code 2001 on the third attempt. No uncertain edit was retried.
+All disposable events were removed; Test 2 remains unchanged.
+
+The source for adapter 0.2.3 advances new exception sequences, preserves the
+parent's recurrence timezone, patches Carbonate to resolve timezone IDs and
+reject invalid recurrence IDs before they can select the master, and uses a
+parent EXDATE plus targeted exception deletion for cancellation. Diagnostics
+contain only fixed labels/numeric codes/categories, never raw upstream text.
+Its 39 Python tests, patched Go calendar/CLI tests (including real recurrence
+identity regression tests), and Docker build pass. It awaits deployment and live
+recurrence acceptance. Actual notification delivery also needs confirmation.
+
+The owner authorized editing the YAML in their signed-in TrueNAS browser. Saving
+0.2.2 succeeded and its running version was checked. A later attempt to save
+0.2.3 returned to sign-in and did not persist the new source. The cause is still
+under investigation; a logout must not be taken as proof of a completed rebuild.

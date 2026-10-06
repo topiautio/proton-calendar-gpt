@@ -14,26 +14,38 @@ services:
         \ +56,7 @@\n \t\t}\n \n \t\tfmt.Fprintf(out, \"\\n%s \u2014 %d event(s)\\\
         n\", name, count)\n+\t\tfmt.Fprintf(out, \"  Calendar ID: %s\\n\", cal.ID)\n\
         \ \n \t\tif !*events && !*ics {\n \t\t\tcontinue\n--- a/cmd/carbonate/main.go\n\
-        +++ b/cmd/carbonate/main.go\n@@ -57,6 +57,10 @@\n \t\treturn cmdServe(ctx,\
+        +++ b/cmd/carbonate/main.go\n@@ -57,6 +57,12 @@\n \t\treturn cmdServe(ctx,\
         \ args[1:], out)\n \tcase \"calendars\":\n \t\treturn cmdCalendars(ctx, args[1:],\
         \ out)\n+\tcase \"calendars-json\":\n+\t\treturn cmdCalendarJSON(ctx, args[1:],\
         \ out, false)\n+\tcase \"events-json\":\n+\t\treturn cmdCalendarJSON(ctx,\
-        \ args[1:], out, true)\n \tcase \"event\":\n \t\treturn cmdEvent(ctx, args[1:],\
-        \ out)\n \tcase \"contacts\":\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE'\
-        \ /src/cmd/carbonate/calendar_api.go\npackage main\n\nimport (\n\t\"context\"\
-        \n\t\"encoding/json\"\n\t\"errors\"\n\t\"flag\"\n\t\"github.com/develonrails/carbonate/internal/calendar\"\
-        \n\t\"io\"\n)\n\n// Machine-readable calendar data for the private adapter.\
-        \ No account/session\n// credentials are included. Targeted UID reads decrypt\
-        \ only the requested event.\nfunc cmdCalendarJSON(ctx context.Context, args\
-        \ []string, out io.Writer, events bool) error {\n\tfs := flag.NewFlagSet(\"\
-        calendar json\", flag.ContinueOnError)\n\tfs.SetOutput(out)\n\tpath := fs.String(\"\
-        session\", \"\", \"session file\")\n\tcalendarID := fs.String(\"calendar\"\
-        , \"\", \"calendar ID\")\n\tuid := fs.String(\"uid\", \"\", \"only this iCalendar\
-        \ UID\")\n\tif err := fs.Parse(args); err != nil {\n\t\treturn err\n\t}\n\t\
-        if fs.NArg() != 0 {\n\t\treturn errors.New(\"unexpected positional argument\"\
-        )\n\t}\n\tconn, err := connect(ctx, *path)\n\tif err != nil {\n\t\treturn\
-        \ err\n\t}\n\tdefer conn.Close()\n\tif !events {\n\t\tcalendars, err := calendar.List(ctx,\
-        \ conn)\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\treturn json.NewEncoder(out).Encode(calendars)\n\
+        \ args[1:], out, true)\n+\tcase \"delete-occurrence\":\n+\t\treturn cmdDeleteOccurrence(ctx,\
+        \ args[1:], out)\n \tcase \"event\":\n \t\treturn cmdEvent(ctx, args[1:],\
+        \ out)\n \tcase \"contacts\":\n--- a/internal/calendar/write.go\n+++ b/internal/calendar/write.go\n\
+        @@ -361,6 +361,9 @@\n \tfor i := range components {\n \t\tevent := &components[i]\n\
+        \ \n+\t\tif event.Props.Get(\"RECURRENCE-ID\") != nil && recurrenceIDOf(event)\
+        \ == 0 {\n+\t\t\treturn nil, fmt.Errorf(\"invalid or unsupported RECURRENCE-ID\"\
+        )\n+\t\t}\n \t\tif recurrenceIDOf(event) == 0 {\n \t\t\tseries = append(series,\
+        \ event)\n \n@@ -701,12 +704,9 @@\n \t\treturn 0\n \t}\n \n-\twhen, err :=\
+        \ time.Parse(\"20060102T150405Z\", strings.TrimSpace(prop.Value))\n-\tif err\
+        \ != nil {\n-\t\t// Also accept a date-only value, which a full-day series\
+        \ uses.\n-\t\tif when, err = time.Parse(\"20060102\", strings.TrimSpace(prop.Value));\
+        \ err != nil {\n-\t\t\treturn 0\n-\t\t}\n+\twhen, err := prop.DateTime(time.UTC)\n\
+        +\tif err != nil {\n+\t\treturn 0\n \t}\n \n \treturn when.Unix()\n\nCALENDAR_SOURCE\n\
+        COPY <<'CALENDAR_SOURCE' /src/cmd/carbonate/calendar_api.go\npackage main\n\
+        \nimport (\n\t\"context\"\n\t\"encoding/json\"\n\t\"errors\"\n\t\"flag\"\n\
+        \t\"github.com/develonrails/carbonate/internal/calendar\"\n\t\"io\"\n)\n\n\
+        // Machine-readable calendar data for the private adapter. No account/session\n\
+        // credentials are included. Targeted UID reads decrypt only the requested\
+        \ event.\nfunc cmdCalendarJSON(ctx context.Context, args []string, out io.Writer,\
+        \ events bool) error {\n\tfs := flag.NewFlagSet(\"calendar json\", flag.ContinueOnError)\n\
+        \tfs.SetOutput(out)\n\tpath := fs.String(\"session\", \"\", \"session file\"\
+        )\n\tcalendarID := fs.String(\"calendar\", \"\", \"calendar ID\")\n\tuid :=\
+        \ fs.String(\"uid\", \"\", \"only this iCalendar UID\")\n\tif err := fs.Parse(args);\
+        \ err != nil {\n\t\treturn err\n\t}\n\tif fs.NArg() != 0 {\n\t\treturn errors.New(\"\
+        unexpected positional argument\")\n\t}\n\tconn, err := connect(ctx, *path)\n\
+        \tif err != nil {\n\t\treturn err\n\t}\n\tdefer conn.Close()\n\tif !events\
+        \ {\n\t\tcalendars, err := calendar.List(ctx, conn)\n\t\tif err != nil {\n\
+        \t\t\treturn err\n\t\t}\n\t\treturn json.NewEncoder(out).Encode(calendars)\n\
         \t}\n\tif *calendarID == \"\" {\n\t\treturn errors.New(\"calendar ID is required\"\
         )\n\t}\n\tdecoded, unreadable, err := calendar.EventsForUID(ctx, conn, *calendarID,\
         \ *uid)\n\tif err != nil {\n\t\treturn err\n\t}\n\ttype item struct {\n\t\t\
@@ -45,22 +57,44 @@ services:
         \ UnreadableCount: len(unreadable)}\n\tfor _, event := range decoded {\n\t\
         \tresult.Events = append(result.Events, item{event.UID, event.ICS(), event.Modified.UTC().Format(\"\
         2006-01-02T15:04:05Z\"), event.Unverified})\n\t}\n\treturn json.NewEncoder(out).Encode(result)\n\
-        }\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE' /src/internal/calendar/query.go\n\
-        package calendar\n\nimport (\n\t\"context\"\n\t\"github.com/develonrails/carbonate/internal/proton\"\
-        \n)\n\n// EventsForUID avoids decrypting an entire account to verify one appointment.\n\
-        // An empty UID deliberately requests the whole selected calendar.\nfunc EventsForUID(ctx\
-        \ context.Context, conn *proton.Conn, calendarID, uid string) ([]Event, []string,\
-        \ error) {\n\tkeys, err := conn.CalendarKeys(ctx, calendarID)\n\tif err !=\
-        \ nil {\n\t\treturn nil, nil, err\n\t}\n\traw, err := fetchAll(ctx, conn,\
-        \ calendarID)\n\tif err != nil {\n\t\treturn nil, nil, err\n\t}\n\tif uid\
-        \ != \"\" {\n\t\tselected := raw[:0]\n\t\tfor _, event := range raw {\n\t\t\
-        \tif event.UID == uid {\n\t\t\t\tselected = append(selected, event)\n\t\t\t\
-        }\n\t\t}\n\t\traw = selected\n\t}\n\tevents, unreadable := decodeAll(raw,\
-        \ keys.CalKR, keys.AddrKR)\n\treturn events, unreadable, nil\n}\n\nCALENDAR_SOURCE\n\
-        RUN git apply /tmp/carbonate-cli.patch\nRUN CGO_ENABLED=0 go build -trimpath\
-        \ -o /out/carbonate ./cmd/carbonate\n\nFROM python:3.14-slim-bookworm\nRUN\
-        \ groupadd -g 10001 calendar && useradd -u 10001 -g calendar -M calendar &&\
-        \ mkdir /data /app && chown calendar:calendar /data\nCOPY --from=bridge /out/carbonate\
+        }\n\nfunc cmdDeleteOccurrence(ctx context.Context, args []string, out io.Writer)\
+        \ error {\n\tfs := flag.NewFlagSet(\"delete occurrence\", flag.ContinueOnError)\n\
+        \tfs.SetOutput(out)\n\tpath := fs.String(\"session\", \"\", \"session file\"\
+        )\n\tcalendarID := fs.String(\"calendar\", \"\", \"calendar ID\")\n\tuid :=\
+        \ fs.String(\"uid\", \"\", \"iCalendar UID\")\n\trid := fs.Int64(\"recurrence-id\"\
+        , 0, \"original occurrence Unix timestamp\")\n\tif err := fs.Parse(args);\
+        \ err != nil {\n\t\treturn err\n\t}\n\tif fs.NArg() != 0 || *calendarID ==\
+        \ \"\" || *uid == \"\" || *rid == 0 {\n\t\treturn errors.New(\"calendar, UID\
+        \ and nonzero recurrence ID are required\")\n\t}\n\tconn, err := connect(ctx,\
+        \ *path)\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer conn.Close()\n\t\
+        deleted, err := calendar.DeleteOccurrence(ctx, conn, *calendarID, *uid, *rid)\n\
+        \tif err != nil {\n\t\treturn err\n\t}\n\treturn json.NewEncoder(out).Encode(map[string]bool{\"\
+        deleted\": deleted})\n}\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE' /src/internal/calendar/query.go\n\
+        package calendar\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"github.com/develonrails/carbonate/internal/proton\"\
+        \n\t_ \"time/tzdata\" // Resolve recurrence TZIDs even in the slim runtime\
+        \ image.\n)\n\n// EventsForUID avoids decrypting an entire account to verify\
+        \ one appointment.\n// An empty UID deliberately requests the whole selected\
+        \ calendar.\nfunc EventsForUID(ctx context.Context, conn *proton.Conn, calendarID,\
+        \ uid string) ([]Event, []string, error) {\n\tkeys, err := conn.CalendarKeys(ctx,\
+        \ calendarID)\n\tif err != nil {\n\t\treturn nil, nil, err\n\t}\n\traw, err\
+        \ := fetchAll(ctx, conn, calendarID)\n\tif err != nil {\n\t\treturn nil, nil,\
+        \ err\n\t}\n\tif uid != \"\" {\n\t\tselected := raw[:0]\n\t\tfor _, event\
+        \ := range raw {\n\t\t\tif event.UID == uid {\n\t\t\t\tselected = append(selected,\
+        \ event)\n\t\t\t}\n\t\t}\n\t\traw = selected\n\t}\n\tevents, unreadable :=\
+        \ decodeAll(raw, keys.CalKR, keys.AddrKR)\n\treturn events, unreadable, nil\n\
+        }\n\n// DeleteOccurrence removes only a matching exception row, never its\
+        \ master.\nfunc DeleteOccurrence(ctx context.Context, conn *proton.Conn, calendarID,\
+        \ uid string, recurrenceID int64) (bool, error) {\n\tif recurrenceID == 0\
+        \ {\n\t\treturn false, errors.New(\"refusing to delete a master as an occurrence\"\
+        )\n\t}\n\tkeys, err := conn.CalendarKeys(ctx, calendarID)\n\tif err != nil\
+        \ {\n\t\treturn false, err\n\t}\n\tevent, err := findEvent(ctx, conn, calendarID,\
+        \ uid, recurrenceID)\n\tif err != nil || event == nil {\n\t\treturn false,\
+        \ err\n\t}\n\t_, err = sync(ctx, conn, calendarID, keys.MemberID, deleteEntry{ID:\
+        \ event.ID}, false)\n\treturn err == nil, err\n}\n\nCALENDAR_SOURCE\nRUN git\
+        \ apply /tmp/carbonate-cli.patch\nRUN CGO_ENABLED=0 go build -trimpath -o\
+        \ /out/carbonate ./cmd/carbonate\n\nFROM python:3.14-slim-bookworm\nRUN groupadd\
+        \ -g 10001 calendar && useradd -u 10001 -g calendar -M calendar && mkdir /data\
+        \ /app && chown calendar:calendar /data\nCOPY --from=bridge /out/carbonate\
         \ /usr/local/bin/carbonate\nWORKDIR /app\nCOPY <<'CALENDAR_SOURCE' /app/requirements.txt\n\
         fastapi==0.142.2\nuvicorn==0.54.0\nicalendar==7.3.0\nrecurring-ical-events==3.8.2\n\
         \nCALENDAR_SOURCE\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY\
@@ -147,7 +181,7 @@ services:
         \        self.safe_diagnostic = safe_diagnostic\n\n\nclass CalendarContext(BaseModel):\n\
         \    now: str\n    timezone: str\n    default_duration_minutes: int\n    provider:\
         \ str\n    login_configured: bool\n    api_version: int = 2\n    adapter_version:\
-        \ str = \"0.2.2\"\n    selected_calendar_id: str\n    capabilities: list[str]\n\
+        \ str = \"0.2.3\"\n    selected_calendar_id: str\n    capabilities: list[str]\n\
         \n\nclass EventStatus(BaseModel):\n    job_id: str\n    state: str = Field(description=\"\
         pending, writing, verified, or unknown. Only verified confirms a saved event.\"\
         )\n    event: dict\n    error: str\n    calendar_url: str\n    poll_after_seconds:\
@@ -165,24 +199,32 @@ services:
         \ data.\n        match = re.search(rb'Proton rejected (?:the event|the request)[^\\\
         r\\n]*\\(code ([0-9]{3,6})\\)', result.stderr)\n        diagnostic = 'bridge\
         \ command failed'\n        if match:\n            diagnostic = 'Proton rejected\
-        \ the write, code ' + match[1].decode('ascii')\n        raise BridgeError(\"\
-        Bridge command failed; check login and calendar configuration\", diagnostic)\n\
-        \    return result.stdout.decode(\"utf-8\", errors=\"strict\")\n\n\ndef verified_in_output(output,\
-        \ event, uid):\n    # Carbonate's calendars --ics indents each iCalendar line\
-        \ with '    | '.\n    lines = [line[6:] for line in output.splitlines() if\
-        \ line.startswith(\"    | \")]\n    text = \"\\r\\n\".join(lines) + \"\\r\\\
-        n\"\n    # Each event is a separate VCALENDAR; parse independently.\n    blocks\
-        \ = re.findall(r\"BEGIN:VCALENDAR\\r\\n.*?END:VCALENDAR\", text, re.S)\n \
-        \   for block in blocks:\n        for item in Calendar.from_ical(block).walk(\"\
-        VEVENT\"):\n            if str(item.get(\"UID\", \"\")) != uid:\n        \
-        \        continue\n            return (\n                str(item.get(\"SUMMARY\"\
-        , \"\")) == event.title\n                and item.decoded(\"DTSTART\") ==\
-        \ event.start\n                and item.decoded(\"DTEND\") == event.end\n\
-        \                and str(item.get(\"LOCATION\", \"\")) == event.location\n\
-        \                and str(item.get(\"DESCRIPTION\", \"\")) == event.description\n\
-        \            )\n    return False\n\n\ndef update_job(job_id, state, error=\"\
-        \"):\n    with db() as conn:\n        conn.execute(\"UPDATE jobs SET state=?,\
-        \ error=? WHERE id=?\", (state, error, job_id))\n\n\ndef creation_calendar(event):\n\
+        \ the write, code ' + match[1].decode('ascii')\n            lowered = result.stderr.lower()\n\
+        \            for category, words in (\n                ('signature', (b'signed',\
+        \ b'signature')),\n                ('timezone', (b'tzid', b'timezone', b'time\
+        \ zone')),\n                ('recurrence', (b'recurr', b'parent')),\n    \
+        \            ('duplicate', (b'already exists', b'duplicate')),\n         \
+        \       ('sequence', (b'sequence',)),\n                ('properties', (b'properties',\
+        \ b'property')),\n            ):\n                if any(word in lowered for\
+        \ word in words):\n                    diagnostic += ', category ' + category\n\
+        \                    break\n        raise BridgeError(\"Bridge command failed;\
+        \ check login and calendar configuration\", diagnostic)\n    return result.stdout.decode(\"\
+        utf-8\", errors=\"strict\")\n\n\ndef verified_in_output(output, event, uid):\n\
+        \    # Carbonate's calendars --ics indents each iCalendar line with '    |\
+        \ '.\n    lines = [line[6:] for line in output.splitlines() if line.startswith(\"\
+        \    | \")]\n    text = \"\\r\\n\".join(lines) + \"\\r\\n\"\n    # Each event\
+        \ is a separate VCALENDAR; parse independently.\n    blocks = re.findall(r\"\
+        BEGIN:VCALENDAR\\r\\n.*?END:VCALENDAR\", text, re.S)\n    for block in blocks:\n\
+        \        for item in Calendar.from_ical(block).walk(\"VEVENT\"):\n       \
+        \     if str(item.get(\"UID\", \"\")) != uid:\n                continue\n\
+        \            return (\n                str(item.get(\"SUMMARY\", \"\")) ==\
+        \ event.title\n                and item.decoded(\"DTSTART\") == event.start\n\
+        \                and item.decoded(\"DTEND\") == event.end\n              \
+        \  and str(item.get(\"LOCATION\", \"\")) == event.location\n             \
+        \   and str(item.get(\"DESCRIPTION\", \"\")) == event.description\n      \
+        \      )\n    return False\n\n\ndef update_job(job_id, state, error=\"\"):\n\
+        \    with db() as conn:\n        conn.execute(\"UPDATE jobs SET state=?, error=?\
+        \ WHERE id=?\", (state, error, job_id))\n\n\ndef creation_calendar(event):\n\
         \    selected = event.calendar_id or CALENDAR_ID\n    if not selected:\n \
         \       calendars = json.loads(run_bridge(['calendars-json']))\n        if\
         \ len(calendars) != 1:\n            raise operations.OperationError('Select\
@@ -250,7 +292,7 @@ services:
         \  os.chmod(DATA / \"jobs.sqlite\", 0o600)\n    STOP.clear()\n    thread =\
         \ threading.Thread(target=worker, daemon=True)\n    thread.start()\n    yield\n\
         \    STOP.set()\n    WAKE.set()\n    thread.join(timeout=2)\n\n\napp = FastAPI(title=\"\
-        Private Proton Calendar\", version=\"0.2.2\", lifespan=lifespan,\n       \
+        Private Proton Calendar\", version=\"0.2.3\", lifespan=lifespan,\n       \
         \       servers=[{\"url\": PUBLIC_URL}], docs_url=None, redoc_url=None)\n\
         bearer = HTTPBearer(auto_error=False)\n\n\ndef authorize(credentials: HTTPAuthorizationCredentials\
         \ | None = Depends(bearer)):\n    key = secret(\"ACTION_API_KEY\")\n    if\
@@ -548,42 +590,55 @@ services:
         \ k in ('start', 'end', 'recurrence')):\n        raise OperationError('Rescheduling\
         \ a series with existing exceptions requires manual review in Proton')\n \
         \   original_master_signature = verification_signature(master) if master is\
-        \ not None else None\n    expected = None\n    if operation.scope == 'occurrence':\n\
-        \        target = selected_occurrence(cal, operation.recurrence_id)\n    \
-        \    for key in ('RRULE', 'RDATE', 'EXDATE'):\n            if key in target:\n\
-        \                del target[key]\n        if operation.kind == 'delete_event':\n\
-        \            # Cancel this instance as an exception; do not delete the master\
-        \ UID.\n            if 'STATUS' in target:\n                del target['STATUS']\n\
-        \            target.add('status', 'CANCELLED')\n        else:\n          \
-        \  if 'recurrence' in operation.changes:\n                raise OperationError('An\
-        \ occurrence cannot change the series recurrence')\n            target = update_component(target,\
+        \ not None else None\n    expected = None\n    cancelled_recurrence = None\n\
+        \    if operation.scope == 'occurrence':\n        target = selected_occurrence(cal,\
+        \ operation.recurrence_id)\n        for key in ('RRULE', 'RDATE', 'EXDATE'):\n\
+        \            if key in target:\n                del target[key]\n        if\
+        \ operation.kind == 'delete_event':\n            # Proton excludes an occurrence\
+        \ on the parent, then removes its\n            # exception row if one exists.\
+        \ Never delete the shared series UID.\n            cancelled_recurrence =\
+        \ operation.recurrence_id\n            zone = master.decoded('DTSTART').tzinfo\
+        \ if isinstance(master.decoded('DTSTART'), datetime) else None\n         \
+        \   excluded = cancelled_recurrence.astimezone(zone) if isinstance(cancelled_recurrence,\
+        \ datetime) else cancelled_recurrence\n            master.add('exdate', excluded)\n\
+        \            target = master\n        else:\n            if 'recurrence' in\
+        \ operation.changes:\n                raise OperationError('An occurrence\
+        \ cannot change the series recurrence')\n            target = update_component(target,\
         \ operation.changes)\n        # Carbonate increments existing rows, but a\
         \ new exception has no row\n        # yet. Its sequence must advance beyond\
         \ the parent, as Proton's client\n        # does when changing an occurrence's\
         \ schedule.\n        sequence = max(int(master.get('SEQUENCE', 0)), int(target.get('SEQUENCE',\
         \ 0))) + 1\n        if 'SEQUENCE' in target:\n            del target['SEQUENCE']\n\
-        \        target.add('sequence', sequence)\n        if not target.get('RECURRENCE-ID'):\n\
-        \            target.add('recurrence-id', target.decoded('DTSTART'))\n    \
-        \    write_cal = Calendar()\n        write_cal.add('version', '2.0')\n   \
-        \     write_cal.add('prodid', '-//Private Proton Calendar//EN')\n        write_cal.add_component(target)\n\
-        \        expected = target\n    elif operation.kind == 'update_event':\n \
-        \       target = master or items[0]\n        update_component(target, operation.changes)\n\
-        \        if operation.scope == 'series':\n            shared_changes = {k:v\
-        \ for k,v in operation.changes.items() if k in ('title', 'location', 'description',\
-        \ 'reminders_minutes')}\n            for item in items:\n                if\
-        \ item is not target and shared_changes:\n                    update_component(item,\
-        \ shared_changes)\n        write_cal = cal\n        expected = target\n  \
-        \  if operation.kind == 'update_event' or operation.scope == 'occurrence':\n\
-        \        # Carbonate identifies an exception only from a UTC or date-only\n\
-        \        # RECURRENCE-ID. A TZID value would otherwise select the master UID.\n\
-        \        for item in write_cal.walk('VEVENT'):\n            rid = item.decoded('RECURRENCE-ID',\
-        \ None)\n            if isinstance(rid, datetime):\n                del item['RECURRENCE-ID']\n\
-        \                item.add('recurrence-id', rid.astimezone(timezone.utc))\n\
-        \    expected_items = [expected] if operation.scope == 'occurrence' else (write_cal.walk('VEVENT')\
+        \        target.add('sequence', sequence)\n        if cancelled_recurrence\
+        \ is None and not target.get('RECURRENCE-ID'):\n            target.add('recurrence-id',\
+        \ target.decoded('DTSTART'))\n        write_cal = Calendar()\n        write_cal.add('version',\
+        \ '2.0')\n        write_cal.add('prodid', '-//Private Proton Calendar//EN')\n\
+        \        write_cal.add_component(target)\n        expected = target\n    elif\
+        \ operation.kind == 'update_event':\n        target = master or items[0]\n\
+        \        update_component(target, operation.changes)\n        if operation.scope\
+        \ == 'series':\n            shared_changes = {k:v for k,v in operation.changes.items()\
+        \ if k in ('title', 'location', 'description', 'reminders_minutes')}\n   \
+        \         for item in items:\n                if item is not target and shared_changes:\n\
+        \                    update_component(item, shared_changes)\n        write_cal\
+        \ = cal\n        expected = target\n    if operation.kind == 'update_event'\
+        \ or operation.scope == 'occurrence':\n        # Match the parent's timezone\
+        \ on exception properties, as Proton's\n        # client does. The patched\
+        \ bridge resolves TZIDs when finding rows.\n        for item in write_cal.walk('VEVENT'):\n\
+        \            rid = item.decoded('RECURRENCE-ID', None)\n            if isinstance(rid,\
+        \ datetime):\n                del item['RECURRENCE-ID']\n                zone\
+        \ = master.decoded('DTSTART').tzinfo\n                item.add('recurrence-id',\
+        \ rid.astimezone(zone))\n                if operation.scope == 'occurrence':\n\
+        \                    for name in ('DTSTART', 'DTEND'):\n                 \
+        \       value = item.decoded(name).astimezone(zone)\n                    \
+        \    del item[name]\n                        item.add(name, value)\n    expected_items\
+        \ = [expected] if operation.scope == 'occurrence' else (write_cal.walk('VEVENT')\
         \ if operation.kind == 'update_event' else [])\n    try:\n        if operation.kind\
         \ == 'delete_event' and operation.scope != 'occurrence':\n            bridge(['event',\
         \ 'delete', '-calendar', calendar_id, '-uid', operation.uid])\n        else:\n\
         \            bridge(['event', 'put', '-calendar', calendar_id], write_cal.to_ical())\n\
+        \            if cancelled_recurrence is not None:\n                bridge(['delete-occurrence',\
+        \ '-calendar', calendar_id, '-uid', operation.uid,\n                     \
+        \   '-recurrence-id', str(int(moment(cancelled_recurrence).timestamp()))])\n\
         \        after = snapshot(bridge, calendar_id, operation.uid)\n        if\
         \ after['unreadable_count']:\n            raise ValueError('Unreadable verification')\n\
         \        remaining = calendar_from_snapshot(after).walk('VEVENT')\n      \
@@ -593,56 +648,57 @@ services:
         \ None) == rid), None)\n            verified = all(any(i.decoded('RECURRENCE-ID',\
         \ None) == expected_item.decoded('RECURRENCE-ID', None) and verification_signature(i)\
         \ == verification_signature(expected_item) for i in remaining) for expected_item\
-        \ in expected_items)\n            if operation.scope == 'occurrence':\n  \
-        \              saved_master = next((i for i in remaining if not i.get('RECURRENCE-ID')),\
-        \ None)\n                verified = verified and saved_master is not None\
-        \ and verification_signature(saved_master) == original_master_signature\n\
+        \ in expected_items)\n            if operation.scope == 'occurrence' and cancelled_recurrence\
+        \ is None:\n                saved_master = next((i for i in remaining if not\
+        \ i.get('RECURRENCE-ID')), None)\n                verified = verified and\
+        \ saved_master is not None and verification_signature(saved_master) == original_master_signature\n\
         \            if operation.kind == 'delete_event':\n                verified\
-        \ = verified and str(actual.get('STATUS', '')) == 'CANCELLED'\n        if\
-        \ not verified:\n            raise ValueError('Verification mismatch')\n \
-        \   except Exception as exc:\n        diagnostic = getattr(exc, 'safe_diagnostic',\
-        \ '')\n        # Bridge diagnostics consist solely of fixed labels or a numeric\
-        \ code.\n        if diagnostic and not (diagnostic in ('bridge command failed',\
-        \ 'bridge unavailable or timed out') or re.fullmatch(r'Proton rejected the\
-        \ write, code [0-9]{3,6}', diagnostic)):\n            diagnostic = ''\n  \
-        \      if not diagnostic and isinstance(exc, ValueError) and str(exc) in ('Verification\
-        \ mismatch', 'Unreadable verification'):\n            diagnostic = str(exc)\n\
-        \        suffix = f' ({diagnostic})' if diagnostic else ''\n        raise\
-        \ MutationUncertain('Mutation could not be verified' + suffix + '. Check Proton\
-        \ before attempting another mutation.') from exc\n    return {'verified':\
-        \ True, 'calendar_id': calendar_id, 'uid': operation.uid, 'scope': operation.scope,\
-        \ 'operation': operation.kind}\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE'\
-        \ /app/entrypoint.sh\n#!/bin/sh\nset -eu\numask 077\nif [ -f /run/secrets/bridge_password\
-        \ ]; then\n    CARBONATE_BRIDGE_PASSWORD=$$(cat /run/secrets/bridge_password)\n\
-        \    export CARBONATE_BRIDGE_PASSWORD\nfi\nexec \"$$@\"\n\nCALENDAR_SOURCE\n\
-        COPY <<'CALENDAR_SOURCE' /app/bootstrap.py\n\"\"\"Optional TrueNAS YAML startup:\
-        \ create a bridge secret and log in once.\"\"\"\nimport os\nimport secrets\n\
-        import subprocess\nimport sys\nfrom pathlib import Path\n\n\ndef initialize_bridge(data):\n\
-        \    data.mkdir(mode=0o700, parents=True, exist_ok=True)\n    path = data\
-        \ / 'bridge_password'\n    if not path.exists():\n        with path.open('x')\
-        \ as out:\n            out.write(secrets.token_urlsafe(48) + '\\n')\n    path.chmod(0o600)\n\
-        \    os.environ['CARBONATE_BRIDGE_PASSWORD_FILE'] = str(path)\n    os.environ['CARBONATE_BRIDGE_PASSWORD']\
-        \ = path.read_text().strip()\n\n\ndef login_once(data, interactive=False):\n\
-        \    if (data / 'auth.json').exists():\n        if interactive:\n        \
-        \    print('A session already exists. Stop calendar activity before reauthentication.',\
-        \ file=sys.stderr)\n            return False\n        return True\n    username\
-        \ = os.getenv('PROTON_USERNAME', '')\n    password = os.getenv('PROTON_PASSWORD',\
-        \ '')\n    if not username or (not interactive and not password):\n      \
-        \  print('Proton login is not configured. Set PROTON_USERNAME and PROTON_PASSWORD\
-        \ in the App YAML, or use the App container Shell for interactive login.',\
-        \ file=sys.stderr)\n        return False\n    args = ['carbonate', 'auth',\
-        \ username, '-session', str(data / 'auth.json'), '-keep-bridge-password']\n\
-        \    if interactive:\n        return subprocess.run(args, check=False).returncode\
-        \ == 0\n    attempt = os.getenv('PROTON_LOGIN_ATTEMPT', '1')\n    marker =\
-        \ data / 'login_attempt'\n    if marker.exists() and marker.read_text() ==\
-        \ attempt:\n        print('No automatic login retry. Update the credentials/code\
-        \ and increment PROTON_LOGIN_ATTEMPT in the App YAML to try once again.',\
-        \ file=sys.stderr)\n        return False\n    answers = [password]\n    for\
-        \ name in ('PROTON_TWO_FACTOR_CODE', 'PROTON_MAILBOX_PASSWORD'):\n       \
-        \ if os.getenv(name):\n            answers.append(os.environ[name])\n    if\
-        \ any('\\n' in answer or '\\r' in answer for answer in answers):\n       \
-        \ print('Login answers must each be one line.', file=sys.stderr)\n       \
-        \ return False\n    marker.write_text(attempt)\n    marker.chmod(0o600)\n\
+        \ = verified and not any(i.get('RECURRENCE-ID') and moment(i.decoded('RECURRENCE-ID'))\
+        \ == moment(cancelled_recurrence) for i in remaining)\n        if not verified:\n\
+        \            raise ValueError('Verification mismatch')\n    except Exception\
+        \ as exc:\n        diagnostic = getattr(exc, 'safe_diagnostic', '')\n    \
+        \    # Bridge diagnostics consist solely of fixed labels or a numeric code.\n\
+        \        if diagnostic and not (diagnostic in ('bridge command failed', 'bridge\
+        \ unavailable or timed out') or re.fullmatch(r'Proton rejected the write,\
+        \ code [0-9]{3,6}(?:, category (?:signature|timezone|recurrence|duplicate|sequence|properties))?',\
+        \ diagnostic)):\n            diagnostic = ''\n        if not diagnostic and\
+        \ isinstance(exc, ValueError) and str(exc) in ('Verification mismatch', 'Unreadable\
+        \ verification'):\n            diagnostic = str(exc)\n        suffix = f'\
+        \ ({diagnostic})' if diagnostic else ''\n        raise MutationUncertain('Mutation\
+        \ could not be verified' + suffix + '. Check Proton before attempting another\
+        \ mutation.') from exc\n    return {'verified': True, 'calendar_id': calendar_id,\
+        \ 'uid': operation.uid, 'scope': operation.scope, 'operation': operation.kind}\n\
+        \nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE' /app/entrypoint.sh\n#!/bin/sh\n\
+        set -eu\numask 077\nif [ -f /run/secrets/bridge_password ]; then\n    CARBONATE_BRIDGE_PASSWORD=$$(cat\
+        \ /run/secrets/bridge_password)\n    export CARBONATE_BRIDGE_PASSWORD\nfi\n\
+        exec \"$$@\"\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE' /app/bootstrap.py\n\
+        \"\"\"Optional TrueNAS YAML startup: create a bridge secret and log in once.\"\
+        \"\"\nimport os\nimport secrets\nimport subprocess\nimport sys\nfrom pathlib\
+        \ import Path\n\n\ndef initialize_bridge(data):\n    data.mkdir(mode=0o700,\
+        \ parents=True, exist_ok=True)\n    path = data / 'bridge_password'\n    if\
+        \ not path.exists():\n        with path.open('x') as out:\n            out.write(secrets.token_urlsafe(48)\
+        \ + '\\n')\n    path.chmod(0o600)\n    os.environ['CARBONATE_BRIDGE_PASSWORD_FILE']\
+        \ = str(path)\n    os.environ['CARBONATE_BRIDGE_PASSWORD'] = path.read_text().strip()\n\
+        \n\ndef login_once(data, interactive=False):\n    if (data / 'auth.json').exists():\n\
+        \        if interactive:\n            print('A session already exists. Stop\
+        \ calendar activity before reauthentication.', file=sys.stderr)\n        \
+        \    return False\n        return True\n    username = os.getenv('PROTON_USERNAME',\
+        \ '')\n    password = os.getenv('PROTON_PASSWORD', '')\n    if not username\
+        \ or (not interactive and not password):\n        print('Proton login is not\
+        \ configured. Set PROTON_USERNAME and PROTON_PASSWORD in the App YAML, or\
+        \ use the App container Shell for interactive login.', file=sys.stderr)\n\
+        \        return False\n    args = ['carbonate', 'auth', username, '-session',\
+        \ str(data / 'auth.json'), '-keep-bridge-password']\n    if interactive:\n\
+        \        return subprocess.run(args, check=False).returncode == 0\n    attempt\
+        \ = os.getenv('PROTON_LOGIN_ATTEMPT', '1')\n    marker = data / 'login_attempt'\n\
+        \    if marker.exists() and marker.read_text() == attempt:\n        print('No\
+        \ automatic login retry. Update the credentials/code and increment PROTON_LOGIN_ATTEMPT\
+        \ in the App YAML to try once again.', file=sys.stderr)\n        return False\n\
+        \    answers = [password]\n    for name in ('PROTON_TWO_FACTOR_CODE', 'PROTON_MAILBOX_PASSWORD'):\n\
+        \        if os.getenv(name):\n            answers.append(os.environ[name])\n\
+        \    if any('\\n' in answer or '\\r' in answer for answer in answers):\n \
+        \       print('Login answers must each be one line.', file=sys.stderr)\n \
+        \       return False\n    marker.write_text(attempt)\n    marker.chmod(0o600)\n\
         \    try:\n        # Keep login output and credentials out of App logs; manual\
         \ challenges\n        # can be handled interactively in the browser's container\
         \ Shell.\n        result = subprocess.run(args + ['-password-stdin'], input=('\\\

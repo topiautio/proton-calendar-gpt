@@ -146,7 +146,7 @@ class CalendarContext(BaseModel):
     provider: str
     login_configured: bool
     api_version: int = 2
-    adapter_version: str = "0.2.2"
+    adapter_version: str = "0.2.3"
     selected_calendar_id: str
     capabilities: list[str]
 
@@ -179,6 +179,18 @@ def run_bridge(args, content=None):
         diagnostic = 'bridge command failed'
         if match:
             diagnostic = 'Proton rejected the write, code ' + match[1].decode('ascii')
+            lowered = result.stderr.lower()
+            for category, words in (
+                ('signature', (b'signed', b'signature')),
+                ('timezone', (b'tzid', b'timezone', b'time zone')),
+                ('recurrence', (b'recurr', b'parent')),
+                ('duplicate', (b'already exists', b'duplicate')),
+                ('sequence', (b'sequence',)),
+                ('properties', (b'properties', b'property')),
+            ):
+                if any(word in lowered for word in words):
+                    diagnostic += ', category ' + category
+                    break
         raise BridgeError("Bridge command failed; check login and calendar configuration", diagnostic)
     return result.stdout.decode("utf-8", errors="strict")
 
@@ -311,7 +323,7 @@ async def lifespan(app):
     thread.join(timeout=2)
 
 
-app = FastAPI(title="Private Proton Calendar", version="0.2.2", lifespan=lifespan,
+app = FastAPI(title="Private Proton Calendar", version="0.2.3", lifespan=lifespan,
               servers=[{"url": PUBLIC_URL}], docs_url=None, redoc_url=None)
 bearer = HTTPBearer(auto_error=False)
 

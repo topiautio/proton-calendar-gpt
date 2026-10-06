@@ -348,16 +348,20 @@ def execute(operation, bridge, default_calendar):
         raise OperationError('Rescheduling a series with existing exceptions requires manual review in Proton')
     original_master_signature = verification_signature(master) if master is not None else None
     expected = None
+    cancelled_recurrence = None
     if operation.scope == 'occurrence':
         target = selected_occurrence(cal, operation.recurrence_id)
         for key in ('RRULE', 'RDATE', 'EXDATE'):
             if key in target:
                 del target[key]
         if operation.kind == 'delete_event':
-            # Cancel this instance as an exception; do not delete the master UID.
-            if 'STATUS' in target:
-                del target['STATUS']
-            target.add('status', 'CANCELLED')
+            # Proton excludes an occurrence on the parent, then removes its
+            # exception row if one exists. Never delete the shared series UID.
+            cancelled_recurrence = operation.recurrence_id
+            zone = master.decoded('DTSTART').tzinfo if isinstance(master.decoded('DTSTART'), datetime) else None
+            excluded = cancelled_recurrence.astimezone(zone) if isinstance(cancelled_recurrence, datetime) else cancelled_recurrence
+            master.add('exdate', excluded)
+            target = master
         else:
             if 'recurrence' in operation.changes:
                 raise OperationError('An occurrence cannot change the series recurrence')
@@ -369,7 +373,7 @@ def execute(operation, bridge, default_calendar):
         if 'SEQUENCE' in target:
             del target['SEQUENCE']
         target.add('sequence', sequence)
-        if not target.get('RECURRENCE-ID'):
+        if cancelled_recurrence is None and not target.get('RECURRENCE-ID'):
             target.add('recurrence-id', target.decoded('DTSTART'))
         write_cal = Calendar()
         write_cal.add('version', '2.0')
@@ -387,19 +391,28 @@ def execute(operation, bridge, default_calendar):
         write_cal = cal
         expected = target
     if operation.kind == 'update_event' or operation.scope == 'occurrence':
-        # Carbonate identifies an exception only from a UTC or date-only
-        # RECURRENCE-ID. A TZID value would otherwise select the master UID.
+        # Match the parent's timezone on exception properties, as Proton's
+        # client does. The patched bridge resolves TZIDs when finding rows.
         for item in write_cal.walk('VEVENT'):
             rid = item.decoded('RECURRENCE-ID', None)
             if isinstance(rid, datetime):
                 del item['RECURRENCE-ID']
-                item.add('recurrence-id', rid.astimezone(timezone.utc))
+                zone = master.decoded('DTSTART').tzinfo
+                item.add('recurrence-id', rid.astimezone(zone))
+                if operation.scope == 'occurrence':
+                    for name in ('DTSTART', 'DTEND'):
+                        value = item.decoded(name).astimezone(zone)
+                        del item[name]
+                        item.add(name, value)
     expected_items = [expected] if operation.scope == 'occurrence' else (write_cal.walk('VEVENT') if operation.kind == 'update_event' else [])
     try:
         if operation.kind == 'delete_event' and operation.scope != 'occurrence':
             bridge(['event', 'delete', '-calendar', calendar_id, '-uid', operation.uid])
         else:
             bridge(['event', 'put', '-calendar', calendar_id], write_cal.to_ical())
+            if cancelled_recurrence is not None:
+                bridge(['delete-occurrence', '-calendar', calendar_id, '-uid', operation.uid,
+                        '-recurrence-id', str(int(moment(cancelled_recurrence).timestamp()))])
         after = snapshot(bridge, calendar_id, operation.uid)
         if after['unreadable_count']:
             raise ValueError('Unreadable verification')
@@ -410,17 +423,17 @@ def execute(operation, bridge, default_calendar):
             rid = expected.decoded('RECURRENCE-ID', None)
             actual = next((i for i in remaining if i.decoded('RECURRENCE-ID', None) == rid), None)
             verified = all(any(i.decoded('RECURRENCE-ID', None) == expected_item.decoded('RECURRENCE-ID', None) and verification_signature(i) == verification_signature(expected_item) for i in remaining) for expected_item in expected_items)
-            if operation.scope == 'occurrence':
+            if operation.scope == 'occurrence' and cancelled_recurrence is None:
                 saved_master = next((i for i in remaining if not i.get('RECURRENCE-ID')), None)
                 verified = verified and saved_master is not None and verification_signature(saved_master) == original_master_signature
             if operation.kind == 'delete_event':
-                verified = verified and str(actual.get('STATUS', '')) == 'CANCELLED'
+                verified = verified and not any(i.get('RECURRENCE-ID') and moment(i.decoded('RECURRENCE-ID')) == moment(cancelled_recurrence) for i in remaining)
         if not verified:
             raise ValueError('Verification mismatch')
     except Exception as exc:
         diagnostic = getattr(exc, 'safe_diagnostic', '')
         # Bridge diagnostics consist solely of fixed labels or a numeric code.
-        if diagnostic and not (diagnostic in ('bridge command failed', 'bridge unavailable or timed out') or re.fullmatch(r'Proton rejected the write, code [0-9]{3,6}', diagnostic)):
+        if diagnostic and not (diagnostic in ('bridge command failed', 'bridge unavailable or timed out') or re.fullmatch(r'Proton rejected the write, code [0-9]{3,6}(?:, category (?:signature|timezone|recurrence|duplicate|sequence|properties))?', diagnostic)):
             diagnostic = ''
         if not diagnostic and isinstance(exc, ValueError) and str(exc) in ('Verification mismatch', 'Unreadable verification'):
             diagnostic = str(exc)

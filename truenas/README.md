@@ -97,4 +97,4 @@ Edit the existing App's YAML; do not install a second App. Preserve its environm
 
 For this development installation, the local `proton-calendar-upgrade.private.yaml` is a ready-to-paste copy of the current App configuration with only the build source updated. It contains private settings, is excluded from Git and must not be shared. Paste it into the **existing** App's Edit YAML screen and save. Do not remove or reset its volumes.
 
-After the rebuild, `getCalendarContext` should report `api_version: 2` and `adapter_version: 0.2.2`. Run the live acceptance checklist before calling the project complete. Read-only SSH access was used to inspect and preserve the existing configuration; the NAS was not modified by the agent.
+After the rebuild, `getCalendarContext` should report `api_version: 2` and `adapter_version: 0.2.3`. Run the live acceptance checklist before calling the project complete. Read-only SSH access was used to inspect and preserve configuration. Updates were applied through the signed-in TrueNAS UI with the owner's authorization. If Save signs you out, inspect Jobs History and the running adapter version before assuming the rebuild completed.
