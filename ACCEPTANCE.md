@@ -95,8 +95,9 @@ Remaining final host check: ChatGPT was sent an explicit description-edit and
 cleanup request for only the completed phone test
 `46fe94ae607cf7c5994a2dcc5b1f730aac05090ffc0cc0570636c3f2500ecd4b@private-proton-gpt`.
 It returned no assistant result for those messages. A fresh adapter read confirms
-that event still exists with its original description/revision. The owner has
-been asked to inspect the chat for an action approval/error. No further mutation
+that event still exists with its original description/revision. The owner saw no action approval or error. A shorter request with the app
+explicitly attached also returned no assistant result. The chat was opened for
+the owner to continue directly. No further mutation
 was submitted from the adapter, avoiding a race with a pending host approval.
 The phone test is retained until this is resolved; Test 2 remains unchanged.
 
