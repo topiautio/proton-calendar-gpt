@@ -24,15 +24,16 @@ Live adapter checks passed timed and all-day creation/rescheduling, reminders,
 weekly creation across DST, and individual/series deletion. All disposable test
 events were removed and Test 2 remains unchanged.
 
-Adapter 0.2.3 verified a moved single occurrence with its master preserved. Its
-cancellation saved correctly but strict exclusion wire comparison returned
-unknown. Adapter 0.2.4 normalizes equivalent exclusion dates; live verification
-is in progress. The TrueNAS Save/logout cause was its 64 KiB request limit.
-Compressed YAML now fits and saves successfully without logout. All 40 Python
-tests, patched Go tests, and the exact generated Docker build pass. Whole-series
-reminder edits passed adapter read-back. ChatGPT's six-poll limit stops some slow
-operations before completion and needs workflow refinement. Delivered reminders
-also need owner confirmation. See ACCEPTANCE.md for the precise checkpoint.
+Adapter 0.2.4 verified occurrence editing and cancellation, plus reminder edits
+on the master and exception. Phone notification delivery is confirmed. The
+TrueNAS Save/logout cause was its 64 KiB request limit; compressed YAML now saves
+and deploys successfully. Forty Python tests, patched Go tests, eleven hosted
+Node tests, TypeScript, and both Docker/Site production builds pass. Hosted status
+calls now wait with bounded read-only polls; a regular ChatGPT event read reached
+ready in one status call. The final ChatGPT description edit and cleanup returned
+no assistant result; owner inspection of a possible action approval/error is
+pending. That completed phone test is retained, while all recurrence acceptance
+events are deleted and Test 2 remains unchanged. See ACCEPTANCE.md.
 
 Local tests do not establish live Proton compatibility. Completion requires live
 read-back plus explicit edit, recurrence and reminder tests on disposable events.

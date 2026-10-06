@@ -100,6 +100,24 @@ async function adapter(env: Env, path: string, body?: unknown) {
   catch { throw new Error("Calendar reply could not be read. Check Proton before retrying a write."); }
 }
 
+// Wait within one status call, using read-only GETs against the original job.
+// This lets the host's bounded polling handle slow Proton crypto/verification.
+export async function waitForCalendarStatus<T extends {state:string;poll_after_seconds:number}>(
+  read: () => Promise<T>,
+  delay: (ms:number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve,ms)),
+  now: () => number = Date.now,
+  budgetMs = 24_000,
+): Promise<T> {
+  const deadline=now()+budgetMs;
+  let value=await read();
+  while (["pending","running","writing"].includes(value.state) && now()<deadline) {
+    await delay(Math.min(Math.max(value.poll_after_seconds,1)*1000, deadline-now()));
+    if(now()>=deadline) break;
+    value=await read();
+  }
+  return value;
+}
+
 async function queueCalendarOperation(env: Env, kind: string, args: unknown) {
   const context = contextResponse.parse(await adapter(env,"/context"));
   if ((context.api_version ?? 1) < 2) throw new Error("These calendar features need the updated TrueNAS YAML. The installed adapter currently supports event creation only.");
@@ -117,13 +135,13 @@ async function callTool(name: string, args: unknown, env: Env) {
     }
     case "getCalendarContext": emptyInput.parse(args); return adapter(env, "/context");
     case "createCalendarEvent": return adapter(env, "/events", eventInput.parse(args));
-    case "getEventStatus": return adapter(env, `/events/${jobInput.parse(args).job_id}`);
+    case "getEventStatus": { const path=`/events/${jobInput.parse(args).job_id}`; return waitForCalendarStatus(async () => jobResponse.parse(await adapter(env,path))); }
     case "listCalendars": emptyInput.parse(args); return queueCalendarOperation(env,"list_calendars",{});
     case "listCalendarEvents": return queueCalendarOperation(env,"list_events",listInput.parse(args));
     case "getCalendarEvent": return queueCalendarOperation(env,"get_event",readInput.parse(args));
     case "updateCalendarEvent": return queueCalendarOperation(env,"update_event",updateInput.parse(args));
     case "deleteCalendarEvent": return queueCalendarOperation(env,"delete_event",deleteInput.parse(args));
-    case "getCalendarOperationStatus": return adapter(env,`/operations/${operationInput.parse(args).operation_id}`);
+    case "getCalendarOperationStatus": { const path=`/operations/${operationInput.parse(args).operation_id}`; return waitForCalendarStatus(async () => operationResponse.parse(await adapter(env,path))); }
     case "verifyEventWrite": return adapter(env,`/events/${jobInput.parse(args).job_id}/verify`,{});
     default: throw new Error("Unknown tool.");
   }

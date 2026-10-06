@@ -40,61 +40,66 @@ a fake bridge and cannot establish live compatibility or delivered notifications
 
 ## Checkpoint: 6 October 2026
 
-TrueNAS runs adapter 0.2.4. Reconnecting the ChatGPT plugin resolved its stale
-tool catalog. A read-only check in regular ChatGPT successfully used
-`listCalendars`, `listCalendarEvents`, `getCalendarEvent` and
-`getCalendarOperationStatus`: all three calendars were returned, Kalenteri was
-the default, and Test 2 was found/read at its original 13:00–14:00 Helsinki time.
-Its old creation job was reconciled to `verified` without rewriting it.
+TrueNAS runs adapter 0.2.4. The private hosted plugin uses source
+`1405c5c5b05200060e1c4c401ca8e329b32a8aa8` and deployed successfully.
+Reconnecting previously resolved the stale tool catalog.
 
-Authenticated adapter acceptance checks passed:
+Verified live through the authenticated adapter:
 
-- Timed creation with a 15-minute device reminder, title edit and rescheduling;
-  the reminder survived a fresh read.
-- Three-occurrence weekly creation with a 30-minute reminder, retaining 09:00
-  Helsinki across the October DST transition.
-- All-day creation with a 60-minute reminder and rescheduling; the exclusive
-  end date remained correct.
-- Verified deletion of all disposable acceptance events, including both whole
-  recurring series. Test 2 was preserved.
+- Timed creation, title edits and rescheduling with preserved device reminders.
+- All-day creation/rescheduling with correct exclusive end dates.
+- Weekly recurrence across the October Helsinki DST transition, preserving
+  local start times while offsets change.
+- Moving one occurrence while retaining its original recurrence identity and
+  leaving its master unchanged.
+- Changing reminders on both a recurring master and its saved exception.
+- Cancelling one occurrence with EXDATE plus targeted exception removal;
+  adapter 0.2.4 reports ready/verified.
+- Individual and whole-series deletion. All recurrence acceptance events were
+  deleted with verified status. Test 2 was retained unchanged.
+- Repeating the exact notification-test creation request reuses its original
+  verified job; it does not create another event.
+- The owner's phone received the five-minute notification for the 17:20
+  Helsinki test on 6 October, as confirmed at 17:15.
 
-Regular ChatGPT also created and read a disposable two-occurrence weekly series
-with a 15-minute reminder. Its whole-series title/reminder edit reached verified
-status on the adapter and a fresh read showed 45-minute reminders on both dates.
-ChatGPT stopped polling after its six-check limit; the adapter continued the
-operation. The disposable series was subsequently deleted with verified status
-through the adapter. This polling limit needs further workflow testing.
+Verified through regular ChatGPT's installed plugin:
 
-Single-occurrence editing returned `unknown` on three disposable series. Fresh
-reads confirmed their masters unchanged, with no saved exception. No uncertain
-write was automatically retried. Occurrence cancellation and reminder edits
-across existing exceptions have not passed live acceptance. Adapter 0.2.2 exposed
-Proton rejection code 2001 on the third attempt. No uncertain edit was retried.
-All disposable events were removed; Test 2 remains unchanged.
+- Listing Vanha, Holidays in Finland and Kalenteri; searching and reading Test 2.
+- Creating/reading a disposable weekly series with reminders. Its whole-series
+  title/reminder edit eventually verified on the adapter; a fresh read confirmed
+  both occurrences changed. Its cleanup through the adapter verified.
+- Reading the phone test's correct title, times and reminder with verified
+  signatures. Operation `0be93f6b92554882bec096973814f3c7` reached ready after one
+  status poll under the improved hosted polling behavior.
 
-The source for adapter 0.2.3 advances new exception sequences, preserves the
-parent's recurrence timezone, patches Carbonate to resolve timezone IDs and
-reject invalid recurrence IDs before they can select the master, and uses a
-parent EXDATE plus targeted exception deletion for cancellation. Diagnostics
-contain only fixed labels/numeric codes/categories, never raw upstream text.
-Its 39 Python tests, patched Go calendar/CLI tests (including real recurrence
-identity regression tests), and Docker build pass. It is deployed and live recurrence acceptance is in progress. Actual notification delivery also needs confirmation.
+Hosted status tools now wait up to 24 seconds per call using only read-only GETs
+against the original job. They return terminal states promptly, remain bounded,
+and never repeat mutations or unknown jobs. Eleven Node tests, TypeScript and
+production build pass. Forty Python tests, patched Go calendar/CLI tests, and the
+exact compressed inline Docker build pass.
 
-The owner authorized editing the YAML in their signed-in TrueNAS browser. The
-Save/logout failure was traced to the installed middleware's 65,536-character
-authenticated WebSocket message limit: the expanded private YAML exceeded it,
-and the connection closed before a job started. Compressed embedded source
-reduced the private YAML to about 27 KB. The exact generated Docker build passed,
-then Save completed successfully in TrueNAS with the session intact. The App
-returned to RUNNING and the public API reported adapter 0.2.3. Generated templates
-now enforce a request-size budget with headroom for private settings.
+The TrueNAS Save/logout cause was its 65,536-character authenticated WebSocket
+message limit. Expanded YAML exceeded it and the connection closed before a job
+started. Compressed embedded source reduced private YAML to about 27 KB. Both
+updates subsequently saved, rebuilt and returned to RUNNING with the session
+intact. Generated templates enforce a size budget with headroom for settings.
+The editor must finish loading its existing YAML before pasting an update.
 
-Adapter 0.2.3 then verified a moved single occurrence and preservation of its
-master. Cancellation saved successfully: a fresh list returned only October 19
-and November 2 and no exception remained. Its operation stayed unknown because
-the exclusion comparison used wire strings. Adapter 0.2.4 compares EXDATE/RDATE
-as sets of actual instants, independent of UTC spelling, grouping and duplicate
-signed cards. Its new regression test checks equivalent dates and detects extra
-exclusions; all 40 Python tests and the exact inline Docker build pass. The small
-YAML saved again without logout and the deployed API reports 0.2.4. A different
-occurrence is being tested; the uncertain cancellation is never replayed.
+Earlier occurrence edits were uncertain and were not retried. Timezone-aware
+recurrence identity fixed editing. The first cancellation saved, but comparison
+of EXDATE wire strings returned unknown; fresh reads confirmed the occurrence
+absent and other dates retained. Normalizing exclusions as sets of actual dates
+fixed verification, including duplicate signed cards and equivalent timezones.
+
+Remaining final host check: ChatGPT was sent an explicit description-edit and
+cleanup request for only the completed phone test
+`46fe94ae607cf7c5994a2dcc5b1f730aac05090ffc0cc0570636c3f2500ecd4b@private-proton-gpt`.
+It returned no assistant result for those messages. A fresh adapter read confirms
+that event still exists with its original description/revision. The owner has
+been asked to inspect the chat for an action approval/error. No further mutation
+was submitted from the adapter, avoiding a race with a pending host approval.
+The phone test is retained until this is resolved; Test 2 remains unchanged.
+
+Notification delivery and the adapter capabilities have passed. The release is
+not marked complete until the remaining ChatGPT mutation/cleanup check resolves.
+Attendee invitations are intentionally outside this agreed first-version scope.

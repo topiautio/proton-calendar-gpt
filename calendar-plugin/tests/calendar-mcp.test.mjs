@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handleMcp, handleConnectionHealth } from '../lib/calendar-mcp.ts';
+import { handleMcp, handleConnectionHealth, waitForCalendarStatus } from '../lib/calendar-mcp.ts';
 const env = { PROTON_ADAPTER_URL: 'https://calendar.test', PROTON_ACTION_API_KEY: 'a'.repeat(40) };
 const request = (method, params, auth=true) => new Request('https://plugin.test/mcp', { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { 'oai-authenticated-user-id': 'test-owner' } : {}) }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
 const call = async (name, args={}, config=env) => (await handleMcp(request('tools/call', { name, arguments: args }), config)).json();
@@ -59,7 +59,7 @@ test('write forwards only the validated event and polling preserves the same job
   const payload = {title:'School', start:'2026-10-07T09:45:00+03:00'};
   globalThis.fetch = async (url, options) => {
     requests.push({url,options});
-    return Response.json({job_id:id,state:'pending',event:payload,error:'',calendar_url:'https://calendar.proton.me',poll_after_seconds:3});
+    return Response.json({job_id:id,state:options.method==='GET'?'verified':'pending',event:payload,error:'',calendar_url:'https://calendar.proton.me',poll_after_seconds:3});
   };
   try {
     const result = await call('createCalendarEvent', payload);
@@ -126,7 +126,7 @@ test('existing event mutations require revision and preserve deliberate scope', 
   globalThis.fetch=async(url,options)=>{
     requests.push({url,options});
     if(url.endsWith('/context'))return Response.json({now:'2026-10-06T12:00:00+03:00',timezone:'Europe/Helsinki',default_duration_minutes:60,provider:'proton',login_configured:true,api_version:2});
-    return Response.json({operation_id:'d'.repeat(64),state:'pending',result:{},error:'',poll_after_seconds:3});
+    return Response.json({operation_id:'d'.repeat(64),state:options.method==='GET'?'ready':'pending',result:{},error:'',poll_after_seconds:3});
   };
   try {
     assert.equal((await call('updateCalendarEvent',{uid:'event',scope:'series',changes:{title:'Changed'}})).result.isError,true);
@@ -138,4 +138,18 @@ test('existing event mutations require revision and preserve deliberate scope', 
     await call('getCalendarOperationStatus',{operation_id:'d'.repeat(64)});
     assert.equal(requests[2].options.method,'GET');
   } finally {globalThis.fetch=original;}
+});
+
+
+test('status wait stops on completion or deadline without retrying unknown jobs', async()=>{
+  let clock=0, reads=0;
+  const delay=async ms=>{clock+=ms;};
+  const ready=await waitForCalendarStatus(async()=>({state:++reads===3?'ready':'running',poll_after_seconds:3}),delay,()=>clock,24000);
+  assert.equal(ready.state,'ready');assert.equal(reads,3);assert.equal(clock,6000);
+  clock=0;reads=0;
+  const pending=await waitForCalendarStatus(async()=>{reads++;return {state:'running',poll_after_seconds:3};},delay,()=>clock,7000);
+  assert.equal(pending.state,'running');assert.equal(clock,7000);assert.equal(reads,3);
+  reads=0;
+  const uncertain=await waitForCalendarStatus(async()=>{reads++;return {state:'unknown',poll_after_seconds:0};},delay,()=>clock);
+  assert.equal(uncertain.state,'unknown');assert.equal(reads,1);
 });
