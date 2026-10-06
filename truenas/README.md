@@ -12,7 +12,7 @@ The checked NAS runs TrueNAS 25.10.7 and Docker Compose 2.38.1. Inline Dockerfil
 
 ## Set values in the YAML
 
-Leave the long `build/dockerfile_inline` source block intact. Edit the `calendar` service's `environment` block:
+Leave the `build/dockerfile_inline` source block intact. Its source files are compressed and decoded during the Docker build so the YAML fits TrueNAS’s 64 KiB WebSocket request limit. Edit the `calendar` service's `environment` block:
 
 | Setting | Value |
 | --- | --- |
@@ -98,3 +98,5 @@ Edit the existing App's YAML; do not install a second App. Preserve its environm
 For this development installation, the local `proton-calendar-upgrade.private.yaml` is a ready-to-paste copy of the current App configuration with only the build source updated. It contains private settings, is excluded from Git and must not be shared. Paste it into the **existing** App's Edit YAML screen and save. Do not remove or reset its volumes.
 
 After the rebuild, `getCalendarContext` should report `api_version: 2` and `adapter_version: 0.2.3`. Run the live acceptance checklist before calling the project complete. Read-only SSH access was used to inspect and preserve configuration. Updates were applied through the signed-in TrueNAS UI with the owner's authorization. If Save signs you out, inspect Jobs History and the running adapter version before assuming the rebuild completed.
+
+If Save immediately signs you out, check the JSON-encoded request size. TrueNAS closes authenticated WebSocket requests larger than 65,536 characters before starting a job. Regenerate the compressed templates rather than increasing that limit. Wait for the editor to finish loading its existing YAML before pasting an update.

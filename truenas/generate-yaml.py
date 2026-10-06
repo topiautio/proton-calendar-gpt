@@ -1,6 +1,9 @@
 """Generate source-contained TrueNAS YAML; no repo or registry upload needed."""
 from pathlib import Path
 import copy
+import base64
+import gzip
+import json
 import yaml
 
 root = Path(__file__).resolve().parent.parent
@@ -11,8 +14,11 @@ class Literal(str):
 yaml.SafeDumper.add_representer(Literal, lambda dumper, value: dumper.represent_scalar('tag:yaml.org,2002:str', value, style='|'))
 
 def embedded(name, target):
-    # Escape Compose interpolation; Dockerfile quoted heredocs preserve content.
-    return f"COPY <<'CALENDAR_SOURCE' {target}\n" + (root / name).read_text() + '\nCALENDAR_SOURCE\n'
+    # Keep JSON-encoded app.create/app.update requests below TrueNAS's 64 KiB
+    # limit. Decode the exact source during the build; no external upload needed.
+    source = (root / name).read_bytes()
+    packed = base64.b64encode(gzip.compress(source, mtime=0)).decode('ascii')
+    return f"RUN printf '%s' '{packed}' | base64 -d | gzip -d > {target}\n"
 
 dockerfile = (root / 'Dockerfile').read_text()
 dockerfile = '# syntax=docker/dockerfile:1\n' + dockerfile
@@ -76,3 +82,10 @@ funnel['services']['tailscale'] = ts
 funnel['volumes']['tailscale_state'] = {}
 funnel['configs'] = {'tailscale_serve': {'content': Literal((root / 'tailscale/serve.json').read_text().replace('$', '$$'))}}
 (root / 'truenas/funnel.yaml').write_text(header + yaml.safe_dump(funnel, sort_keys=False))
+
+# JSON adds escaping around the YAML. Reserve headroom for private settings and
+# the UI request envelope, rather than checking only the YAML file size.
+for name in ('existing-proxy', 'ddns', 'funnel'):
+    text = (root / f'truenas/{name}.yaml').read_text()
+    if len(json.dumps(text).encode()) > 48000:
+        raise ValueError(f'{name} YAML exceeds the TrueNAS request size budget')
