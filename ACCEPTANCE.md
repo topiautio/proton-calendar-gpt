@@ -64,6 +64,6 @@ write was automatically retried. Occurrence cancellation and reminder edits
 across existing exceptions have not passed live acceptance. The source for
 adapter 0.2.2 advances new exception sequences beyond the parent and exposes only
 fixed failure labels/numeric provider codes, never raw upstream error text.
-Its 38 Python tests and Docker build pass; the generated YAML parses. It awaits
+Its 38 Python tests and Docker build pass; the generated inline YAML also builds. It awaits
 deployment and live recurrence acceptance. Plugin mutation flows and actual
 notification delivery also require end-to-end confirmation.

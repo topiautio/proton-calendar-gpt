@@ -86,7 +86,7 @@ Keep this App as the only adapter for the Proton session. Use TrueNAS Apps for i
 python3 truenas/generate-yaml.py
 ```
 
-The YAML configurations and bootstrap behavior are verified locally. No App was installed or modified on the NAS through the read-only SSH access. Live Proton login and event creation still require account testing. The separate shell Compose files remain an optional developer installation route.
+The YAML configurations and bootstrap behavior are verified locally. The owner deployed the App through the TrueNAS UI, and live login, reads, ordinary mutations and recurring creation have been tested. Single-occurrence mutations remain under investigation; see [acceptance results](../ACCEPTANCE.md). No App was installed or modified through the read-only SSH access. The separate shell Compose files remain an optional developer installation route.
 
 References: [TrueNAS custom Apps](https://www.truenas.com/docs/scale/apps/installcustomappscreens/), [Docker inline build support](https://docs.docker.com/reference/compose-file/build/#dockerfile_inline).
 
@@ -97,4 +97,4 @@ Edit the existing App's YAML; do not install a second App. Preserve its environm
 
 For this development installation, the local `proton-calendar-upgrade.private.yaml` is a ready-to-paste copy of the current App configuration with only the build source updated. It contains private settings, is excluded from Git and must not be shared. Paste it into the **existing** App's Edit YAML screen and save. Do not remove or reset its volumes.
 
-After the rebuild, `getCalendarContext` should report `api_version: 2`. Run the live acceptance checklist before calling the project complete. Read-only SSH access was used to inspect and preserve the existing configuration; the NAS was not modified by the agent.
+After the rebuild, `getCalendarContext` should report `api_version: 2` and `adapter_version: 0.2.2`. Run the live acceptance checklist before calling the project complete. Read-only SSH access was used to inspect and preserve the existing configuration; the NAS was not modified by the agent.

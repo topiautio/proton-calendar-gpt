@@ -108,6 +108,8 @@ The published plugin uses the Site-hosted MCP endpoint; do not paste the NAS Ope
 
 Sites handles OAuth between ChatGPT and the hosted plugin. The hosted plugin calls the NAS adapter using its secret API key. The Proton session and bridge password stay on the NAS. Keep both the Site and its plugin owner-private because this service uses one Proton account. See [plugin setup](calendar-plugin/README.md) for the complete connection instructions.
 
+After publishing new plugin tools, an existing ChatGPT connection can retain its old tool list. In this installation, disconnecting and reconnecting My Proton Calendar, then starting a new chat, exposed the upgraded tools. Rebuilding the NAS alone does not refresh ChatGPT's tool catalog.
+
 The [original custom GPT Action setup](custom-gpt-alternative.md) remains an optional alternative. Its confirmation flags apply only to that route; plugin actions follow the host’s permission controls.
 
 ## 5. Verify before everyday use
