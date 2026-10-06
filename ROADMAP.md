@@ -24,16 +24,15 @@ Live adapter checks passed timed and all-day creation/rescheduling, reminders,
 weekly creation across DST, and individual/series deletion. All disposable test
 events were removed and Test 2 remains unchanged.
 
-Single-occurrence editing remains unverified; fresh reads showed no exception and
-the original master unchanged. Adapter 0.2.2 reported Proton rejection code 2001.
-The tested 0.2.3 source preserves parent recurrence timezones and cancels with an
-EXDATE plus targeted exception deletion. Its 39 Python tests, Go calendar/CLI
-tests, and Docker build pass. Deployment is blocked by the TrueNAS browser
-session ending during Save; the new source did not persist. Whole-series reminder
-changes have passed adapter read-back. ChatGPT's six-poll limit stops some slow
-operations before completion and needs workflow refinement. Occurrence edits,
-cancellation and delivered reminders still need live acceptance. See
-ACCEPTANCE.md for the precise checkpoint.
+Adapter 0.2.3 verified a moved single occurrence with its master preserved. Its
+cancellation saved correctly but strict exclusion wire comparison returned
+unknown. Adapter 0.2.4 normalizes equivalent exclusion dates; live verification
+is in progress. The TrueNAS Save/logout cause was its 64 KiB request limit.
+Compressed YAML now fits and saves successfully without logout. All 40 Python
+tests, patched Go tests, and the exact generated Docker build pass. Whole-series
+reminder edits passed adapter read-back. ChatGPT's six-poll limit stops some slow
+operations before completion and needs workflow refinement. Delivered reminders
+also need owner confirmation. See ACCEPTANCE.md for the precise checkpoint.
 
 Local tests do not establish live Proton compatibility. Completion requires live
 read-back plus explicit edit, recurrence and reminder tests on disposable events.

@@ -146,7 +146,7 @@ class CalendarContext(BaseModel):
     provider: str
     login_configured: bool
     api_version: int = 2
-    adapter_version: str = "0.2.3"
+    adapter_version: str = "0.2.4"
     selected_calendar_id: str
     capabilities: list[str]
 
@@ -323,7 +323,7 @@ async def lifespan(app):
     thread.join(timeout=2)
 
 
-app = FastAPI(title="Private Proton Calendar", version="0.2.3", lifespan=lifespan,
+app = FastAPI(title="Private Proton Calendar", version="0.2.4", lifespan=lifespan,
               servers=[{"url": PUBLIC_URL}], docs_url=None, redoc_url=None)
 bearer = HTTPBearer(auto_error=False)
 

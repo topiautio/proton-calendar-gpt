@@ -297,6 +297,13 @@ def verification_signature(item):
         if name in ('DTSTART', 'DTEND', 'RECURRENCE-ID') and value is not None:
             decoded = item.decoded(name)
             result[name] = moment(decoded).isoformat() if isinstance(decoded, datetime) else decoded.isoformat()
+        elif name in ('EXDATE', 'RDATE') and value is not None:
+            # Proton can repeat EXDATE in shared/calendar signed cards and
+            # serialize equivalent dates in UTC. Compare the set of instants,
+            # independent of grouping, duplicate cards, or timezone spelling.
+            values = value if isinstance(value, list) else [value]
+            result[name] = sorted({moment(v.dt).isoformat() if isinstance(v.dt, datetime)
+                                   else v.dt.isoformat() for group in values for v in group.dts})
         elif value is not None and not (name in ('LOCATION', 'DESCRIPTION') and not str(value)):
             values = value if isinstance(value, list) else [value]
             result[name] = sorted(v.to_ical().decode() for v in values)

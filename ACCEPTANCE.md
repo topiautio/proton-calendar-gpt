@@ -40,7 +40,7 @@ a fake bridge and cannot establish live compatibility or delivered notifications
 
 ## Checkpoint: 6 October 2026
 
-TrueNAS runs adapter 0.2.2. Reconnecting the ChatGPT plugin resolved its stale
+TrueNAS runs adapter 0.2.4. Reconnecting the ChatGPT plugin resolved its stale
 tool catalog. A read-only check in regular ChatGPT successfully used
 `listCalendars`, `listCalendarEvents`, `getCalendarEvent` and
 `getCalendarOperationStatus`: all three calendars were returned, Kalenteri was
@@ -78,10 +78,23 @@ reject invalid recurrence IDs before they can select the master, and uses a
 parent EXDATE plus targeted exception deletion for cancellation. Diagnostics
 contain only fixed labels/numeric codes/categories, never raw upstream text.
 Its 39 Python tests, patched Go calendar/CLI tests (including real recurrence
-identity regression tests), and Docker build pass. It awaits deployment and live
-recurrence acceptance. Actual notification delivery also needs confirmation.
+identity regression tests), and Docker build pass. It is deployed and live recurrence acceptance is in progress. Actual notification delivery also needs confirmation.
 
-The owner authorized editing the YAML in their signed-in TrueNAS browser. Saving
-0.2.2 succeeded and its running version was checked. A later attempt to save
-0.2.3 returned to sign-in and did not persist the new source. The cause is still
-under investigation; a logout must not be taken as proof of a completed rebuild.
+The owner authorized editing the YAML in their signed-in TrueNAS browser. The
+Save/logout failure was traced to the installed middleware's 65,536-character
+authenticated WebSocket message limit: the expanded private YAML exceeded it,
+and the connection closed before a job started. Compressed embedded source
+reduced the private YAML to about 27 KB. The exact generated Docker build passed,
+then Save completed successfully in TrueNAS with the session intact. The App
+returned to RUNNING and the public API reported adapter 0.2.3. Generated templates
+now enforce a request-size budget with headroom for private settings.
+
+Adapter 0.2.3 then verified a moved single occurrence and preservation of its
+master. Cancellation saved successfully: a fresh list returned only October 19
+and November 2 and no exception remained. Its operation stayed unknown because
+the exclusion comparison used wire strings. Adapter 0.2.4 compares EXDATE/RDATE
+as sets of actual instants, independent of UTC spelling, grouping and duplicate
+signed cards. Its new regression test checks equivalent dates and detects extra
+exclusions; all 40 Python tests and the exact inline Docker build pass. The small
+YAML saved again without logout and the deployed API reports 0.2.4. A different
+occurrence is being tested; the uncertain cancellation is never replayed.

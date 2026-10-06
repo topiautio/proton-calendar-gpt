@@ -238,3 +238,17 @@ def test_occurrence_verification_rejects_missing_master():
     revision = read(bridge)['revision']
     with pytest.raises(ops.MutationUncertain):
         ops.execute(ops.CalendarOperation(kind='update_event', uid='fixture@calendar', expected_revision=revision, scope='occurrence', recurrence_id='2026-10-26T09:00:00+02:00', changes={'title':'Moved'}), lossy, CAL)
+
+
+def test_exclusion_verification_compares_instants_and_ignores_duplicate_cards():
+    from zoneinfo import ZoneInfo
+    original = Bridge(sample()).events[0]
+    expected = copy.deepcopy(original)
+    point = datetime(2026, 10, 26, 9, tzinfo=ZoneInfo('Europe/Helsinki'))
+    expected.add('exdate', point)
+    actual = copy.deepcopy(original)
+    actual.add('exdate', point.astimezone(timezone.utc))
+    actual.add('exdate', point.astimezone(timezone.utc))
+    assert ops.verification_signature(actual) == ops.verification_signature(expected)
+    actual.add('exdate', datetime(2026, 11, 2, 7, tzinfo=timezone.utc))
+    assert ops.verification_signature(actual) != ops.verification_signature(expected)
