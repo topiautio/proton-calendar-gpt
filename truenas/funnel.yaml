@@ -1,0 +1,321 @@
+# Self-contained TrueNAS Apps YAML: paste ONE file. No SSH, uploaded source, or prebuilt image required.
+# Set environment values under calendar; keep the build/source block intact.
+# See truenas/README.md for login, 2FA and connection instructions.
+services:
+  calendar:
+    build:
+      context: .
+      dockerfile_inline: "# syntax=docker/dockerfile:1\nFROM golang:1.26-bookworm\
+        \ AS bridge\nRUN apt-get update && apt-get install -y --no-install-recommends\
+        \ git ca-certificates && rm -rf /var/lib/apt/lists/*\nARG CARBONATE_COMMIT=baa9818402e980208ac0041ea6544f3d4683d29d\n\
+        WORKDIR /src\nRUN git clone https://github.com/develonrails/carbonate.git\
+        \ . && git checkout \"$${CARBONATE_COMMIT}\"\nCOPY <<'CALENDAR_SOURCE' /tmp/carbonate-cli.patch\n\
+        --- a/cmd/carbonate/calendars.go\n+++ b/cmd/carbonate/calendars.go\n@@ -56,6\
+        \ +56,7 @@\n \t\t}\n \n \t\tfmt.Fprintf(out, \"\\n%s \u2014 %d event(s)\\\
+        n\", name, count)\n+\t\tfmt.Fprintf(out, \"  Calendar ID: %s\\n\", cal.ID)\n\
+        \ \n \t\tif !*events && !*ics {\n \t\t\tcontinue\n\nCALENDAR_SOURCE\nRUN git\
+        \ apply /tmp/carbonate-cli.patch\nRUN CGO_ENABLED=0 go build -trimpath -o\
+        \ /out/carbonate ./cmd/carbonate\n\nFROM python:3.14-slim-bookworm\nRUN groupadd\
+        \ -g 10001 calendar && useradd -u 10001 -g calendar -M calendar && mkdir /data\
+        \ /app && chown calendar:calendar /data\nCOPY --from=bridge /out/carbonate\
+        \ /usr/local/bin/carbonate\nWORKDIR /app\nCOPY <<'CALENDAR_SOURCE' /app/requirements.txt\n\
+        fastapi==0.142.2\nuvicorn==0.54.0\nicalendar==7.3.0\n\nCALENDAR_SOURCE\nRUN\
+        \ pip install --no-cache-dir -r requirements.txt\nCOPY <<'CALENDAR_SOURCE'\
+        \ /app/app.py\n\"\"\"Private GPT Action adapter for the experimental Carbonate\
+        \ Proton bridge.\"\"\"\nimport hashlib\nimport hmac\nimport json\nimport os\n\
+        import re\nimport sqlite3\nimport subprocess\nimport threading\nimport time\n\
+        from contextlib import asynccontextmanager\nfrom datetime import datetime,\
+        \ timedelta, timezone\nfrom pathlib import Path\nfrom zoneinfo import ZoneInfo\n\
+        \nfrom fastapi import Depends, FastAPI, HTTPException\nfrom fastapi.security\
+        \ import HTTPAuthorizationCredentials, HTTPBearer\nfrom icalendar import Calendar,\
+        \ Event\nfrom pydantic import BaseModel, ConfigDict, Field, field_validator,\
+        \ model_validator\n\nDATA = Path(os.getenv(\"DATA_DIR\", \"/data\"))\nTZ =\
+        \ os.getenv(\"CALENDAR_TIMEZONE\", \"Europe/Helsinki\")\nDEFAULT_DURATION\
+        \ = int(os.getenv(\"DEFAULT_DURATION_MINUTES\", \"60\"))\nCALENDAR_ID = os.getenv(\"\
+        PROTON_CALENDAR_ID\", \"\")\nPUBLIC_URL = os.getenv(\"PUBLIC_URL\", \"https://calendar.example.com\"\
+        ).rstrip(\"/\")\nSTOP = threading.Event()\nWAKE = threading.Event()\n\n\n\
+        def secret(name):\n    path = os.getenv(name + \"_FILE\")\n    return Path(path).read_text().strip()\
+        \ if path else os.getenv(name, \"\")\n\n\ndef db():\n    conn = sqlite3.connect(DATA\
+        \ / \"jobs.sqlite\", timeout=5)\n    conn.row_factory = sqlite3.Row\n    return\
+        \ conn\n\n\nclass EventRequest(BaseModel):\n    model_config = ConfigDict(extra=\"\
+        forbid\")\n    title: str = Field(min_length=1, max_length=200)\n    start:\
+        \ datetime = Field(description=\"Absolute ISO 8601 date/time with UTC offset.\"\
+        )\n    end: datetime | None = Field(default=None, description=\"End with UTC\
+        \ offset; omit to use the configured default duration.\")\n    location: str\
+        \ = Field(default=\"\", max_length=300)\n    description: str = Field(default=\"\
+        \", max_length=2000)\n\n    @field_validator(\"title\", \"location\", \"description\"\
+        )\n    @classmethod\n    def clean_text(cls, value):\n        if any(ord(c)\
+        \ < 32 and c not in \"\\n\\t\" for c in value):\n            raise ValueError(\"\
+        Control characters are not allowed\")\n        return value.strip()\n\n  \
+        \  @model_validator(mode=\"after\")\n    def check_times(self):\n        if\
+        \ not self.title:\n            raise ValueError(\"Title must not be blank\"\
+        )\n        if self.start.utcoffset() is None or (self.end and self.end.utcoffset()\
+        \ is None):\n            raise ValueError(\"Dates require an explicit UTC\
+        \ offset\")\n        self.start = self.start.astimezone(timezone.utc)\n  \
+        \      self.end = (self.end or (self.start + timedelta(minutes=DEFAULT_DURATION))).astimezone(timezone.utc)\n\
+        \        if self.end <= self.start or self.end - self.start > timedelta(days=7):\n\
+        \            raise ValueError(\"End must follow start and duration must not\
+        \ exceed seven days\")\n        if self.start.microsecond or self.end.microsecond:\n\
+        \            raise ValueError(\"Use whole seconds\")\n        return self\n\
+        \n\ndef identity(event):\n    payload = event.model_dump(mode=\"json\")\n\
+        \    raw = json.dumps(payload, sort_keys=True, separators=(\",\", \":\"))\n\
+        \    return hashlib.sha256(raw.encode()).hexdigest(), raw\n\n\ndef make_ics(event,\
+        \ uid):\n    cal = Calendar()\n    cal.add(\"prodid\", \"-//Private Proton\
+        \ Calendar GPT//EN\")\n    cal.add(\"version\", \"2.0\")\n    item = Event()\n\
+        \    item.add(\"uid\", uid)\n    item.add(\"dtstamp\", datetime.now(timezone.utc))\n\
+        \    item.add(\"dtstart\", event.start)\n    item.add(\"dtend\", event.end)\n\
+        \    item.add(\"summary\", event.title)\n    if event.location:\n        item.add(\"\
+        location\", event.location)\n    if event.description:\n        item.add(\"\
+        description\", event.description)\n    cal.add_component(item)\n    return\
+        \ cal.to_ical()\n\n\nclass BridgeError(Exception):\n    pass\n\n\nclass CalendarContext(BaseModel):\n\
+        \    now: str\n    timezone: str\n    default_duration_minutes: int\n    provider:\
+        \ str\n    login_configured: bool\n\n\nclass EventStatus(BaseModel):\n   \
+        \ job_id: str\n    state: str = Field(description=\"pending, writing, verified,\
+        \ or unknown. Only verified confirms a saved event.\")\n    event: dict\n\
+        \    error: str\n    calendar_url: str\n    poll_after_seconds: int\n\n\n\
+        def run_bridge(args, content=None):\n    env = os.environ.copy()\n    env[\"\
+        CARBONATE_BRIDGE_PASSWORD\"] = secret(\"CARBONATE_BRIDGE_PASSWORD\")\n   \
+        \ env[\"CARBONATE_NO_INVITATIONS\"] = \"1\"\n    try:\n        result = subprocess.run(\n\
+        \            [\"carbonate\", *args, \"-session\", str(DATA / \"auth.json\"\
+        )],\n            input=content, capture_output=True, timeout=90, env=env,\n\
+        \        )\n    except (subprocess.TimeoutExpired, OSError) as exc:\n    \
+        \    raise BridgeError(\"Bridge unavailable or timed out\") from exc\n   \
+        \ if result.returncode:\n        # Never send upstream errors, tokens, or\
+        \ account data to the API client.\n        raise BridgeError(\"Bridge command\
+        \ failed; check login and calendar configuration\")\n    return result.stdout.decode(\"\
+        utf-8\", errors=\"strict\")\n\n\ndef verified_in_output(output, event, uid):\n\
+        \    # Carbonate's calendars --ics indents each iCalendar line with '    |\
+        \ '.\n    lines = [line[6:] for line in output.splitlines() if line.startswith(\"\
+        \    | \")]\n    text = \"\\r\\n\".join(lines) + \"\\r\\n\"\n    # Each event\
+        \ is a separate VCALENDAR; parse independently.\n    blocks = re.findall(r\"\
+        BEGIN:VCALENDAR\\r\\n.*?END:VCALENDAR\", text, re.S)\n    for block in blocks:\n\
+        \        for item in Calendar.from_ical(block).walk(\"VEVENT\"):\n       \
+        \     if str(item.get(\"UID\", \"\")) != uid:\n                continue\n\
+        \            return (\n                str(item.get(\"SUMMARY\", \"\")) ==\
+        \ event.title\n                and item.decoded(\"DTSTART\") == event.start\n\
+        \                and item.decoded(\"DTEND\") == event.end\n              \
+        \  and str(item.get(\"LOCATION\", \"\")) == event.location\n             \
+        \   and str(item.get(\"DESCRIPTION\", \"\")) == event.description\n      \
+        \      )\n    return False\n\n\ndef update_job(job_id, state, error=\"\"):\n\
+        \    with db() as conn:\n        conn.execute(\"UPDATE jobs SET state=?, error=?\
+        \ WHERE id=?\", (state, error, job_id))\n\n\ndef process_job(row):\n    event\
+        \ = EventRequest.model_validate_json(row[\"payload\"])\n    uid = row[\"id\"\
+        ] + \"@private-proton-gpt\"\n    args = [\"event\", \"put\"]\n    if CALENDAR_ID:\n\
+        \        args += [\"-calendar\", CALENDAR_ID]\n    try:\n        run_bridge(args,\
+        \ make_ics(event, uid))\n        output = run_bridge([\"calendars\", \"--ics\"\
+        ])\n        if not verified_in_output(output, event, uid):\n            raise\
+        \ BridgeError(\"Write was not verified\")\n    except Exception:\n       \
+        \ update_job(row[\"id\"], \"unknown\", \"Could not verify the write. Check\
+        \ Proton Calendar before trying again; the event may already exist.\")\n \
+        \   else:\n        update_job(row[\"id\"], \"verified\")\n\n\ndef worker():\n\
+        \    while not STOP.is_set():\n        with db() as conn:\n            row\
+        \ = conn.execute(\"SELECT * FROM jobs WHERE state='pending' ORDER BY created\
+        \ LIMIT 1\").fetchone()\n            if row:\n                conn.execute(\"\
+        UPDATE jobs SET state='writing' WHERE id=?\", (row[\"id\"],))\n        if\
+        \ row:\n            process_job(row)\n        else:\n            WAKE.wait(1)\n\
+        \            WAKE.clear()\n\n\n@asynccontextmanager\nasync def lifespan(app):\n\
+        \    if len(secret(\"ACTION_API_KEY\")) < 32:\n        raise RuntimeError(\"\
+        Set ACTION_API_KEY_FILE to a secret containing at least 32 characters\")\n\
+        \    if not secret(\"CARBONATE_BRIDGE_PASSWORD\"):\n        raise RuntimeError(\"\
+        Configure CARBONATE_BRIDGE_PASSWORD_FILE after Proton login\")\n    ZoneInfo(TZ)\n\
+        \    if not 1 <= DEFAULT_DURATION <= 10080:\n        raise RuntimeError(\"\
+        Invalid default duration\")\n    DATA.mkdir(mode=0o700, parents=True, exist_ok=True)\n\
+        \    with db() as conn:\n        conn.execute(\"CREATE TABLE IF NOT EXISTS\
+        \ jobs (id TEXT PRIMARY KEY, payload TEXT NOT NULL, state TEXT NOT NULL, error\
+        \ TEXT NOT NULL DEFAULT '', created REAL NOT NULL)\")\n        conn.execute(\"\
+        UPDATE jobs SET state='unknown', error='Server restarted during the write.\
+        \ Check Proton Calendar; no automatic retry was made.' WHERE state='writing'\"\
+        )\n    os.chmod(DATA / \"jobs.sqlite\", 0o600)\n    STOP.clear()\n    thread\
+        \ = threading.Thread(target=worker, daemon=True)\n    thread.start()\n   \
+        \ yield\n    STOP.set()\n    WAKE.set()\n    thread.join(timeout=2)\n\n\n\
+        app = FastAPI(title=\"Private Proton Calendar\", version=\"0.1.0\", lifespan=lifespan,\n\
+        \              servers=[{\"url\": PUBLIC_URL}], docs_url=None, redoc_url=None)\n\
+        bearer = HTTPBearer(auto_error=False)\n\n\ndef authorize(credentials: HTTPAuthorizationCredentials\
+        \ | None = Depends(bearer)):\n    key = secret(\"ACTION_API_KEY\")\n    if\
+        \ not key or not credentials or not hmac.compare_digest(credentials.credentials.encode(),\
+        \ key.encode()):\n        raise HTTPException(401, \"Invalid API key\", headers={\"\
+        WWW-Authenticate\": \"Bearer\"})\n\n\n@app.get(\"/healthz\", include_in_schema=False)\n\
+        def health():\n    return {\"status\": \"ok\"}\n\n\n@app.get(\"/context\"\
+        , dependencies=[Depends(authorize)], operation_id=\"getCalendarContext\",\
+        \ response_model=CalendarContext)\ndef context():\n    \"\"\"Get current local\
+        \ date, timezone and default event duration.\"\"\"\n    return {\"now\": datetime.now(ZoneInfo(TZ)).isoformat(),\
+        \ \"timezone\": TZ,\n            \"default_duration_minutes\": DEFAULT_DURATION,\n\
+        \            \"provider\": \"proton\", \"login_configured\": (DATA / \"auth.json\"\
+        ).exists()}\n\n\n@app.post(\"/events\", status_code=202, dependencies=[Depends(authorize)],\n\
+        \          operation_id=\"createCalendarEvent\", response_model=EventStatus,\
+        \ openapi_extra={\"x-openai-isConsequential\": False})\ndef create_event(event:\
+        \ EventRequest):\n    \"\"\"Queue one event. Poll getEventStatus; only verified\
+        \ means saved. Identical requests reuse the same job.\"\"\"\n    if not (DATA\
+        \ / \"auth.json\").exists():\n        raise HTTPException(503, \"Proton login\
+        \ is required on the server\")\n    job_id, payload = identity(event)\n  \
+        \  with db() as conn:\n        conn.execute(\"BEGIN IMMEDIATE\")\n       \
+        \ existing = conn.execute(\"SELECT id FROM jobs WHERE id=?\", (job_id,)).fetchone()\n\
+        \        if not existing:\n            count = conn.execute(\"SELECT count(*)\
+        \ FROM jobs WHERE state IN ('pending','writing')\").fetchone()[0]\n      \
+        \      if count >= 20:\n                raise HTTPException(429, \"Queue is\
+        \ full; try later\")\n            conn.execute(\"INSERT OR IGNORE INTO jobs(id,payload,state,created)\
+        \ VALUES(?,?,'pending',?)\", (job_id, payload, time.time()))\n    WAKE.set()\n\
+        \    return get_status(job_id)\n\n\n@app.get(\"/events/{job_id}\", dependencies=[Depends(authorize)],\
+        \ operation_id=\"getEventStatus\", response_model=EventStatus)\ndef get_status(job_id:\
+        \ str):\n    \"\"\"Get event status. pending/writing are unfinished; unknown\
+        \ requires checking Proton; verified confirms read-back.\"\"\"\n    with db()\
+        \ as conn:\n        row = conn.execute(\"SELECT * FROM jobs WHERE id=?\",\
+        \ (job_id,)).fetchone()\n    if not row:\n        raise HTTPException(404,\
+        \ \"Unknown job\")\n    return {\"job_id\": row[\"id\"], \"state\": row[\"\
+        state\"], \"event\": json.loads(row[\"payload\"]),\n            \"error\"\
+        : row[\"error\"], \"calendar_url\": \"https://calendar.proton.me\",\n    \
+        \        \"poll_after_seconds\": 3 if row[\"state\"] in (\"pending\", \"writing\"\
+        ) else 0}\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE' /app/entrypoint.sh\n\
+        #!/bin/sh\nset -eu\numask 077\nif [ -f /run/secrets/bridge_password ]; then\n\
+        \    CARBONATE_BRIDGE_PASSWORD=$$(cat /run/secrets/bridge_password)\n    export\
+        \ CARBONATE_BRIDGE_PASSWORD\nfi\nexec \"$$@\"\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE'\
+        \ /app/bootstrap.py\n\"\"\"Optional TrueNAS YAML startup: create a bridge\
+        \ secret and log in once.\"\"\"\nimport os\nimport secrets\nimport subprocess\n\
+        import sys\nfrom pathlib import Path\n\n\ndef initialize_bridge(data):\n \
+        \   data.mkdir(mode=0o700, parents=True, exist_ok=True)\n    path = data /\
+        \ 'bridge_password'\n    if not path.exists():\n        with path.open('x')\
+        \ as out:\n            out.write(secrets.token_urlsafe(48) + '\\n')\n    path.chmod(0o600)\n\
+        \    os.environ['CARBONATE_BRIDGE_PASSWORD_FILE'] = str(path)\n    os.environ['CARBONATE_BRIDGE_PASSWORD']\
+        \ = path.read_text().strip()\n\n\ndef login_once(data, interactive=False):\n\
+        \    if (data / 'auth.json').exists():\n        if interactive:\n        \
+        \    print('A session already exists. Stop calendar activity before reauthentication.',\
+        \ file=sys.stderr)\n            return False\n        return True\n    username\
+        \ = os.getenv('PROTON_USERNAME', '')\n    password = os.getenv('PROTON_PASSWORD',\
+        \ '')\n    if not username or (not interactive and not password):\n      \
+        \  print('Proton login is not configured. Set PROTON_USERNAME and PROTON_PASSWORD\
+        \ in the App YAML, or use the App container Shell for interactive login.',\
+        \ file=sys.stderr)\n        return False\n    args = ['carbonate', 'auth',\
+        \ username, '-session', str(data / 'auth.json'), '-keep-bridge-password']\n\
+        \    if interactive:\n        return subprocess.run(args, check=False).returncode\
+        \ == 0\n    attempt = os.getenv('PROTON_LOGIN_ATTEMPT', '1')\n    marker =\
+        \ data / 'login_attempt'\n    if marker.exists() and marker.read_text() ==\
+        \ attempt:\n        print('No automatic login retry. Update the credentials/code\
+        \ and increment PROTON_LOGIN_ATTEMPT in the App YAML to try once again.',\
+        \ file=sys.stderr)\n        return False\n    answers = [password]\n    for\
+        \ name in ('PROTON_TWO_FACTOR_CODE', 'PROTON_MAILBOX_PASSWORD'):\n       \
+        \ if os.getenv(name):\n            answers.append(os.environ[name])\n    if\
+        \ any('\\n' in answer or '\\r' in answer for answer in answers):\n       \
+        \ print('Login answers must each be one line.', file=sys.stderr)\n       \
+        \ return False\n    marker.write_text(attempt)\n    marker.chmod(0o600)\n\
+        \    try:\n        # Keep login output and credentials out of App logs; manual\
+        \ challenges\n        # can be handled interactively in the browser's container\
+        \ Shell.\n        result = subprocess.run(args + ['-password-stdin'], input=('\\\
+        n'.join(answers) + '\\n').encode(), capture_output=True, timeout=120, check=False)\n\
+        \        success = result.returncode == 0 and (data / 'auth.json').exists()\n\
+        \    except (subprocess.TimeoutExpired, OSError):\n        success = False\n\
+        \    print('Proton session configured.' if success else 'Proton login did\
+        \ not complete. Check credentials/2FA, or open the calendar container Shell\
+        \ and run: python /app/bootstrap.py --interactive-login', file=sys.stderr)\n\
+        \    return success\n\n\ndef main():\n    os.umask(0o077)\n    data = Path(os.getenv('DATA_DIR',\
+        \ '/data'))\n    initialize_bridge(data)\n    interactive = sys.argv[1:] ==\
+        \ ['--interactive-login']\n    if not interactive:\n        key = os.getenv('ACTION_API_KEY',\
+        \ '')\n        if len(key) < 32 or key.startswith('REPLACE_'):\n         \
+        \   raise SystemExit('Set ACTION_API_KEY in the App YAML to a private random\
+        \ key of at least 32 characters.')\n    success = login_once(data, interactive)\n\
+        \    if interactive:\n        raise SystemExit(0 if success else 1)\n    for\
+        \ name in ('PROTON_PASSWORD', 'PROTON_TWO_FACTOR_CODE', 'PROTON_MAILBOX_PASSWORD'):\n\
+        \        os.environ.pop(name, None)\n    os.execvp('uvicorn', ['uvicorn',\
+        \ 'app:app', '--host', '0.0.0.0', '--port', '8000', '--workers', '1', '--no-access-log'])\n\
+        \n\nif __name__ == '__main__':\n    main()\n\nCALENDAR_SOURCE\nRUN chmod 755\
+        \ /app/entrypoint.sh\nUSER 10001:10001\nENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1\n\
+        EXPOSE 8000\nENTRYPOINT [\"/app/entrypoint.sh\"]\nCMD [\"uvicorn\", \"app:app\"\
+        , \"--host\", \"0.0.0.0\", \"--port\", \"8000\", \"--workers\", \"1\", \"\
+        --no-access-log\"]\n"
+    restart: unless-stopped
+    init: true
+    environment:
+      DATA_DIR: /data
+      PUBLIC_URL: https://YOUR_PUBLIC_HOST
+      CALENDAR_TIMEZONE: Europe/Helsinki
+      DEFAULT_DURATION_MINUTES: '60'
+      PROTON_CALENDAR_ID: ''
+      ACTION_API_KEY: REPLACE_WITH_A_RANDOM_KEY_OF_AT_LEAST_32_CHARACTERS
+      CARBONATE_BRIDGE_PASSWORD_FILE: /data/bridge_password
+      CARBONATE_NO_INVITATIONS: '1'
+      PROTON_USERNAME: ''
+      PROTON_PASSWORD: ''
+      PROTON_TWO_FACTOR_CODE: ''
+      PROTON_MAILBOX_PASSWORD: ''
+      PROTON_LOGIN_ATTEMPT: '1'
+    volumes:
+    - calendar_data:/data
+    read_only: true
+    tmpfs:
+    - /tmp:size=32m,mode=1777
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz',
+        timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    command:
+    - python
+    - /app/bootstrap.py
+    depends_on:
+      initialize-storage:
+        condition: service_completed_successfully
+      tailscale:
+        condition: service_started
+    network_mode: service:tailscale
+  initialize-storage:
+    image: python:3.14-slim-bookworm
+    user: 0:0
+    restart: 'no'
+    command:
+    - python
+    - -c
+    - import os; os.chown("/data", 10001, 10001); os.chmod("/data", 0o700)
+    volumes:
+    - calendar_data:/data
+    network_mode: none
+    read_only: true
+    cap_drop:
+    - ALL
+    cap_add:
+    - CHOWN
+    - FOWNER
+    security_opt:
+    - no-new-privileges:true
+  tailscale:
+    image: tailscale/tailscale:v1.102.5
+    hostname: proton-calendar
+    restart: unless-stopped
+    environment:
+      TS_HOSTNAME: proton-calendar
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: 'true'
+      TS_AUTH_ONCE: 'true'
+      TS_AUTHKEY: REPLACE_WITH_YOUR_TAILSCALE_AUTH_KEY
+    volumes:
+    - tailscale_state:/var/lib/tailscale
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    configs:
+    - source: tailscale_serve
+      target: /config/serve.json
+volumes:
+  calendar_data: {}
+  tailscale_state: {}
+configs:
+  tailscale_serve:
+    content: |
+      {
+        "TCP": {"443": {"HTTPS": true}},
+        "Web": {
+          "$${TS_CERT_DOMAIN}:443": {
+            "Handlers": {"/": {"Proxy": "http://127.0.0.1:8000"}}
+          }
+        },
+        "AllowFunnel": {"$${TS_CERT_DOMAIN}:443": true}
+      }

@@ -1,0 +1,10 @@
+--- a/cmd/carbonate/calendars.go
++++ b/cmd/carbonate/calendars.go
+@@ -56,6 +56,7 @@
+ 		}
+ 
+ 		fmt.Fprintf(out, "\n%s — %d event(s)\n", name, count)
++		fmt.Fprintf(out, "  Calendar ID: %s\n", cal.ID)
+ 
+ 		if !*events && !*ics {
+ 			continue

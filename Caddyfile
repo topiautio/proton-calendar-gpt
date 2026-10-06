@@ -1,0 +1,3 @@
+{$CALENDAR_DOMAIN} {
+    reverse_proxy calendar:8000
+}

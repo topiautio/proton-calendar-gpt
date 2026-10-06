@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+data/
+secrets/
+.venv/
+__pycache__/
+.pytest_cache/
+*.tar.gz
+*.tsbuildinfo
+truenas/retry-original-test.*
+calendar-plugin/.openai/
+calendar-plugin/.sites-runtime/
+calendar-plugin/.wrangler/
+calendar-plugin/dist/
+calendar-plugin/node_modules/

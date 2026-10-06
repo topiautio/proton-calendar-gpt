@@ -1,0 +1,312 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Private Proton Calendar",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://calendar.example.com"
+    }
+  ],
+  "paths": {
+    "/context": {
+      "get": {
+        "summary": "Context",
+        "description": "Get current local date, timezone and default event duration.",
+        "operationId": "getCalendarContext",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarContext"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/events": {
+      "post": {
+        "summary": "Create Event",
+        "description": "Queue one event. Poll getEventStatus; only verified means saved. Identical requests reuse the same job.",
+        "operationId": "createCalendarEvent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "x-openai-isConsequential": false
+      }
+    },
+    "/events/{job_id}": {
+      "get": {
+        "summary": "Get Status",
+        "description": "Get event status. pending/writing are unfinished; unknown requires checking Proton; verified confirms read-back.",
+        "operationId": "getEventStatus",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CalendarContext": {
+        "properties": {
+          "now": {
+            "type": "string",
+            "title": "Now"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "default_duration_minutes": {
+            "type": "integer",
+            "title": "Default Duration Minutes"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "login_configured": {
+            "type": "boolean",
+            "title": "Login Configured"
+          }
+        },
+        "type": "object",
+        "required": [
+          "now",
+          "timezone",
+          "default_duration_minutes",
+          "provider",
+          "login_configured"
+        ],
+        "title": "CalendarContext"
+      },
+      "EventRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start",
+            "description": "Absolute ISO 8601 date/time with UTC offset."
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End",
+            "description": "End with UTC offset; omit to use the configured default duration."
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Location",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Description",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "start"
+        ],
+        "title": "EventRequest"
+      },
+      "EventStatus": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "pending, writing, verified, or unknown. Only verified confirms a saved event."
+          },
+          "event": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Event"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error"
+          },
+          "calendar_url": {
+            "type": "string",
+            "title": "Calendar Url"
+          },
+          "poll_after_seconds": {
+            "type": "integer",
+            "title": "Poll After Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "state",
+          "event",
+          "error",
+          "calendar_url",
+          "poll_after_seconds"
+        ],
+        "title": "EventStatus"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

@@ -1,0 +1,67 @@
+# Standalone alternative to compose.yaml; do not combine both.
+services:
+  calendar:
+    build: .
+    image: private-proton-calendar:0.1.0
+    restart: unless-stopped
+    init: true
+    environment:
+      DATA_DIR: /data
+      PUBLIC_URL: ${PUBLIC_URL:-https://calendar.example.com}
+      CALENDAR_TIMEZONE: ${CALENDAR_TIMEZONE:-Europe/Helsinki}
+      DEFAULT_DURATION_MINUTES: ${DEFAULT_DURATION_MINUTES:-60}
+      PROTON_CALENDAR_ID: ${PROTON_CALENDAR_ID:-}
+      ACTION_API_KEY_FILE: /run/secrets/action_api_key
+      CARBONATE_BRIDGE_PASSWORD_FILE: /run/secrets/bridge_password
+      CARBONATE_NO_INVITATIONS: '1'
+    volumes:
+    - ./data:/data
+    secrets:
+    - action_api_key
+    - bridge_password
+    read_only: true
+    tmpfs:
+    - /tmp:size=32m,mode=1777
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz',
+        timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    network_mode: service:tailscale
+    depends_on:
+    - tailscale
+  tailscale:
+    image: tailscale/tailscale:v1.102.5
+    hostname: proton-calendar
+    restart: unless-stopped
+    environment:
+      TS_HOSTNAME: proton-calendar
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: 'true'
+      TS_AUTH_ONCE: 'true'
+    env_file:
+    - ./secrets/tailscale.env
+    volumes:
+    - tailscale_state:/var/lib/tailscale
+    - ./tailscale:/config:ro
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+secrets:
+  action_api_key:
+    file: ./secrets/action_api_key
+  bridge_password:
+    file: ./secrets/bridge_password
+volumes:
+  tailscale_state: {}

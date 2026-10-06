@@ -1,0 +1,37 @@
+services:
+  calendar:
+    build: .
+    image: private-proton-calendar:0.1.0
+    restart: unless-stopped
+    init: true
+    environment:
+      DATA_DIR: /data
+      PUBLIC_URL: ${PUBLIC_URL:-https://calendar.example.com}
+      CALENDAR_TIMEZONE: ${CALENDAR_TIMEZONE:-Europe/Helsinki}
+      DEFAULT_DURATION_MINUTES: ${DEFAULT_DURATION_MINUTES:-60}
+      PROTON_CALENDAR_ID: ${PROTON_CALENDAR_ID:-}
+      ACTION_API_KEY_FILE: /run/secrets/action_api_key
+      CARBONATE_BRIDGE_PASSWORD_FILE: /run/secrets/bridge_password
+      CARBONATE_NO_INVITATIONS: "1"
+    volumes:
+      - ./data:/data
+    secrets:
+      - action_api_key
+      - bridge_password
+    ports:
+      - "127.0.0.1:8787:8000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+secrets:
+  action_api_key:
+    file: ./secrets/action_api_key
+  bridge_password:
+    file: ./secrets/bridge_password
