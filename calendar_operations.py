@@ -345,6 +345,7 @@ def execute(operation, bridge, default_calendar):
         raise OperationError('This is an individual event, not a recurring series')
     if operation.scope == 'series' and operation.kind == 'update_event' and len(items) > 1 and any(k in operation.changes for k in ('start', 'end', 'recurrence')):
         raise OperationError('Rescheduling a series with existing exceptions requires manual review in Proton')
+    original_master_signature = verification_signature(master) if master is not None else None
     expected = None
     if operation.scope == 'occurrence':
         target = selected_occurrence(cal, operation.recurrence_id)
@@ -377,6 +378,14 @@ def execute(operation, bridge, default_calendar):
                     update_component(item, shared_changes)
         write_cal = cal
         expected = target
+    if operation.kind == 'update_event' or operation.scope == 'occurrence':
+        # Carbonate identifies an exception only from a UTC or date-only
+        # RECURRENCE-ID. A TZID value would otherwise select the master UID.
+        for item in write_cal.walk('VEVENT'):
+            rid = item.decoded('RECURRENCE-ID', None)
+            if isinstance(rid, datetime):
+                del item['RECURRENCE-ID']
+                item.add('recurrence-id', rid.astimezone(timezone.utc))
     expected_items = [expected] if operation.scope == 'occurrence' else (write_cal.walk('VEVENT') if operation.kind == 'update_event' else [])
     try:
         if operation.kind == 'delete_event' and operation.scope != 'occurrence':
@@ -393,6 +402,9 @@ def execute(operation, bridge, default_calendar):
             rid = expected.decoded('RECURRENCE-ID', None)
             actual = next((i for i in remaining if i.decoded('RECURRENCE-ID', None) == rid), None)
             verified = all(any(i.decoded('RECURRENCE-ID', None) == expected_item.decoded('RECURRENCE-ID', None) and verification_signature(i) == verification_signature(expected_item) for i in remaining) for expected_item in expected_items)
+            if operation.scope == 'occurrence':
+                saved_master = next((i for i in remaining if not i.get('RECURRENCE-ID')), None)
+                verified = verified and saved_master is not None and verification_signature(saved_master) == original_master_signature
             if operation.kind == 'delete_event':
                 verified = verified and str(actual.get('STATUS', '')) == 'CANCELLED'
         if not verified:

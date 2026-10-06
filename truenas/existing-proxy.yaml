@@ -539,11 +539,12 @@ services:
         \ == 'update_event' and len(items) > 1 and any(k in operation.changes for\
         \ k in ('start', 'end', 'recurrence')):\n        raise OperationError('Rescheduling\
         \ a series with existing exceptions requires manual review in Proton')\n \
-        \   expected = None\n    if operation.scope == 'occurrence':\n        target\
-        \ = selected_occurrence(cal, operation.recurrence_id)\n        for key in\
-        \ ('RRULE', 'RDATE', 'EXDATE'):\n            if key in target:\n         \
-        \       del target[key]\n        if operation.kind == 'delete_event':\n  \
-        \          # Cancel this instance as an exception; do not delete the master\
+        \   original_master_signature = verification_signature(master) if master is\
+        \ not None else None\n    expected = None\n    if operation.scope == 'occurrence':\n\
+        \        target = selected_occurrence(cal, operation.recurrence_id)\n    \
+        \    for key in ('RRULE', 'RDATE', 'EXDATE'):\n            if key in target:\n\
+        \                del target[key]\n        if operation.kind == 'delete_event':\n\
+        \            # Cancel this instance as an exception; do not delete the master\
         \ UID.\n            if 'STATUS' in target:\n                del target['STATUS']\n\
         \            target.add('status', 'CANCELLED')\n        else:\n          \
         \  if 'recurrence' in operation.changes:\n                raise OperationError('An\
@@ -559,7 +560,13 @@ services:
         \ 'reminders_minutes')}\n            for item in items:\n                if\
         \ item is not target and shared_changes:\n                    update_component(item,\
         \ shared_changes)\n        write_cal = cal\n        expected = target\n  \
-        \  expected_items = [expected] if operation.scope == 'occurrence' else (write_cal.walk('VEVENT')\
+        \  if operation.kind == 'update_event' or operation.scope == 'occurrence':\n\
+        \        # Carbonate identifies an exception only from a UTC or date-only\n\
+        \        # RECURRENCE-ID. A TZID value would otherwise select the master UID.\n\
+        \        for item in write_cal.walk('VEVENT'):\n            rid = item.decoded('RECURRENCE-ID',\
+        \ None)\n            if isinstance(rid, datetime):\n                del item['RECURRENCE-ID']\n\
+        \                item.add('recurrence-id', rid.astimezone(timezone.utc))\n\
+        \    expected_items = [expected] if operation.scope == 'occurrence' else (write_cal.walk('VEVENT')\
         \ if operation.kind == 'update_event' else [])\n    try:\n        if operation.kind\
         \ == 'delete_event' and operation.scope != 'occurrence':\n            bridge(['event',\
         \ 'delete', '-calendar', calendar_id, '-uid', operation.uid])\n        else:\n\
@@ -573,10 +580,14 @@ services:
         \ None) == rid), None)\n            verified = all(any(i.decoded('RECURRENCE-ID',\
         \ None) == expected_item.decoded('RECURRENCE-ID', None) and verification_signature(i)\
         \ == verification_signature(expected_item) for i in remaining) for expected_item\
-        \ in expected_items)\n            if operation.kind == 'delete_event':\n \
-        \               verified = verified and str(actual.get('STATUS', '')) == 'CANCELLED'\n\
-        \        if not verified:\n            raise ValueError('Verification mismatch')\n\
-        \    except Exception as exc:\n        raise MutationUncertain('Mutation could\
+        \ in expected_items)\n            if operation.scope == 'occurrence':\n  \
+        \              saved_master = next((i for i in remaining if not i.get('RECURRENCE-ID')),\
+        \ None)\n                verified = verified and saved_master is not None\
+        \ and verification_signature(saved_master) == original_master_signature\n\
+        \            if operation.kind == 'delete_event':\n                verified\
+        \ = verified and str(actual.get('STATUS', '')) == 'CANCELLED'\n        if\
+        \ not verified:\n            raise ValueError('Verification mismatch')\n \
+        \   except Exception as exc:\n        raise MutationUncertain('Mutation could\
         \ not be verified. Check Proton before attempting another mutation.') from\
         \ exc\n    return {'verified': True, 'calendar_id': calendar_id, 'uid': operation.uid,\
         \ 'scope': operation.scope, 'operation': operation.kind}\n\nCALENDAR_SOURCE\n\

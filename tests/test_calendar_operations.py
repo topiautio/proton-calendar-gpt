@@ -35,6 +35,8 @@ class Bridge:
             return json.dumps({'calendar_id': CAL, 'events': records, 'unreadable_count': 0})
         if args[:2] == ['event', 'put']:
             for item in Calendar.from_ical(content).walk('VEVENT'):
+                if item.get('RECURRENCE-ID') and isinstance(item.decoded('RECURRENCE-ID'), datetime):
+                    assert item['RECURRENCE-ID'].to_ical().decode().endswith('Z'), 'Bridge identifies only UTC recurrence IDs'
                 self.events = [e for e in self.events if not (e['UID'] == item['UID'] and e.get('RECURRENCE-ID') == item.get('RECURRENCE-ID'))]
                 self.events.append(item)
             return 'saved'
