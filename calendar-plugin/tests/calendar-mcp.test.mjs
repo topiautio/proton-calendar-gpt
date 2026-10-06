@@ -27,7 +27,8 @@ test('hosting health diagnostic sends no credentials and never returns upstream 
 });
 
 test('anonymous requests never reach the calendar; initialization and discovery work', async () => {
-  assert.equal((await handleMcp(request('tools/list', {}, false), env)).status, 401);
+  assert.equal((await handleMcp(request('tools/list', {}, false), env)).status, 200);
+  assert.equal((await handleMcp(request('tools/call', {name:'listCalendars',arguments:{}}, false), env)).status, 401);
   const init = await (await handleMcp(request('initialize', { protocolVersion: '2025-06-18' }), env)).json();
   assert.equal(init.result.protocolVersion, '2025-06-18');
   const list = await (await handleMcp(request('tools/list'), env)).json();

@@ -131,7 +131,6 @@ async function callTool(name: string, args: unknown, env: Env) {
 
 export async function handleMcp(request: Request, env: Env): Promise<Response> {
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { Allow: "POST" } });
-  if (!request.headers.get("oai-authenticated-user-id")) return Response.json({ error: "Sign in to connect your private calendar plugin." }, { status: 401 });
   if (!request.headers.get("content-type")?.includes("application/json")) return new Response(null, { status: 415 });
   // A low body limit bounds parsing; secrets never appear in protocol errors.
   const reader = request.body?.getReader();
@@ -149,6 +148,9 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
   try { message = JSON.parse(new TextDecoder().decode(bytes)); }
   catch { return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }); }
   if (!message || Array.isArray(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string" || (message.id !== undefined && typeof message.id !== "string" && typeof message.id !== "number")) return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } });
+  // Discovery contains only static metadata. Sites service access can inspect
+  // it without claiming a user identity; every tool call still requires one.
+  if (!["initialize", "ping", "tools/list"].includes(message.method) && !request.headers.get("oai-authenticated-user-id")) return Response.json({ error: "Sign in to connect your private calendar plugin." }, { status: 401 });
   if (message.id === undefined) return new Response(null, { status: 202 });
   const reply = (result: unknown) => Response.json({ jsonrpc: "2.0", id: message.id, result });
   switch (message.method) {
