@@ -143,39 +143,46 @@ services:
         \ event.location:\n        item.add(\"location\", event.location)\n    if\
         \ event.description:\n        item.add(\"description\", event.description)\n\
         \    cal.add_component(item)\n    return cal.to_ical()\n\n\nclass BridgeError(Exception):\n\
-        \    pass\n\n\nclass CalendarContext(BaseModel):\n    now: str\n    timezone:\
-        \ str\n    default_duration_minutes: int\n    provider: str\n    login_configured:\
-        \ bool\n    api_version: int = 2\n    adapter_version: str = \"0.2.1\"\n \
-        \   selected_calendar_id: str\n    capabilities: list[str]\n\n\nclass EventStatus(BaseModel):\n\
-        \    job_id: str\n    state: str = Field(description=\"pending, writing, verified,\
-        \ or unknown. Only verified confirms a saved event.\")\n    event: dict\n\
-        \    error: str\n    calendar_url: str\n    poll_after_seconds: int\n\n\n\
-        def run_bridge(args, content=None):\n    env = os.environ.copy()\n    env[\"\
-        CARBONATE_BRIDGE_PASSWORD\"] = secret(\"CARBONATE_BRIDGE_PASSWORD\")\n   \
-        \ env[\"CARBONATE_NO_INVITATIONS\"] = \"1\"\n    try:\n        result = subprocess.run(\n\
-        \            [\"carbonate\", *args, \"-session\", str(DATA / \"auth.json\"\
-        )],\n            input=content, capture_output=True, timeout=90, env=env,\n\
-        \        )\n    except (subprocess.TimeoutExpired, OSError) as exc:\n    \
-        \    raise BridgeError(\"Bridge unavailable or timed out\") from exc\n   \
-        \ if result.returncode:\n        # Never send upstream errors, tokens, or\
-        \ account data to the API client.\n        raise BridgeError(\"Bridge command\
-        \ failed; check login and calendar configuration\")\n    return result.stdout.decode(\"\
-        utf-8\", errors=\"strict\")\n\n\ndef verified_in_output(output, event, uid):\n\
-        \    # Carbonate's calendars --ics indents each iCalendar line with '    |\
-        \ '.\n    lines = [line[6:] for line in output.splitlines() if line.startswith(\"\
-        \    | \")]\n    text = \"\\r\\n\".join(lines) + \"\\r\\n\"\n    # Each event\
-        \ is a separate VCALENDAR; parse independently.\n    blocks = re.findall(r\"\
-        BEGIN:VCALENDAR\\r\\n.*?END:VCALENDAR\", text, re.S)\n    for block in blocks:\n\
-        \        for item in Calendar.from_ical(block).walk(\"VEVENT\"):\n       \
-        \     if str(item.get(\"UID\", \"\")) != uid:\n                continue\n\
-        \            return (\n                str(item.get(\"SUMMARY\", \"\")) ==\
-        \ event.title\n                and item.decoded(\"DTSTART\") == event.start\n\
-        \                and item.decoded(\"DTEND\") == event.end\n              \
-        \  and str(item.get(\"LOCATION\", \"\")) == event.location\n             \
-        \   and str(item.get(\"DESCRIPTION\", \"\")) == event.description\n      \
-        \      )\n    return False\n\n\ndef update_job(job_id, state, error=\"\"):\n\
-        \    with db() as conn:\n        conn.execute(\"UPDATE jobs SET state=?, error=?\
-        \ WHERE id=?\", (state, error, job_id))\n\n\ndef creation_calendar(event):\n\
+        \    def __init__(self, message, safe_diagnostic=''):\n        super().__init__(message)\n\
+        \        self.safe_diagnostic = safe_diagnostic\n\n\nclass CalendarContext(BaseModel):\n\
+        \    now: str\n    timezone: str\n    default_duration_minutes: int\n    provider:\
+        \ str\n    login_configured: bool\n    api_version: int = 2\n    adapter_version:\
+        \ str = \"0.2.2\"\n    selected_calendar_id: str\n    capabilities: list[str]\n\
+        \n\nclass EventStatus(BaseModel):\n    job_id: str\n    state: str = Field(description=\"\
+        pending, writing, verified, or unknown. Only verified confirms a saved event.\"\
+        )\n    event: dict\n    error: str\n    calendar_url: str\n    poll_after_seconds:\
+        \ int\n\n\ndef run_bridge(args, content=None):\n    env = os.environ.copy()\n\
+        \    env[\"CARBONATE_BRIDGE_PASSWORD\"] = secret(\"CARBONATE_BRIDGE_PASSWORD\"\
+        )\n    env[\"CARBONATE_NO_INVITATIONS\"] = \"1\"\n    try:\n        result\
+        \ = subprocess.run(\n            [\"carbonate\", *args, \"-session\", str(DATA\
+        \ / \"auth.json\")],\n            input=content, capture_output=True, timeout=90,\
+        \ env=env,\n        )\n    except (subprocess.TimeoutExpired, OSError) as\
+        \ exc:\n        raise BridgeError(\"Bridge unavailable or timed out\", 'bridge\
+        \ unavailable or timed out') from exc\n    if result.returncode:\n       \
+        \ # Never send upstream errors, tokens, or account data to the API client.\n\
+        \        # Retain only the numeric code in Carbonate's known rejection format.\n\
+        \        # Never expose the accompanying upstream text, tokens or calendar\
+        \ data.\n        match = re.search(rb'Proton rejected (?:the event|the request)[^\\\
+        r\\n]*\\(code ([0-9]{3,6})\\)', result.stderr)\n        diagnostic = 'bridge\
+        \ command failed'\n        if match:\n            diagnostic = 'Proton rejected\
+        \ the write, code ' + match[1].decode('ascii')\n        raise BridgeError(\"\
+        Bridge command failed; check login and calendar configuration\", diagnostic)\n\
+        \    return result.stdout.decode(\"utf-8\", errors=\"strict\")\n\n\ndef verified_in_output(output,\
+        \ event, uid):\n    # Carbonate's calendars --ics indents each iCalendar line\
+        \ with '    | '.\n    lines = [line[6:] for line in output.splitlines() if\
+        \ line.startswith(\"    | \")]\n    text = \"\\r\\n\".join(lines) + \"\\r\\\
+        n\"\n    # Each event is a separate VCALENDAR; parse independently.\n    blocks\
+        \ = re.findall(r\"BEGIN:VCALENDAR\\r\\n.*?END:VCALENDAR\", text, re.S)\n \
+        \   for block in blocks:\n        for item in Calendar.from_ical(block).walk(\"\
+        VEVENT\"):\n            if str(item.get(\"UID\", \"\")) != uid:\n        \
+        \        continue\n            return (\n                str(item.get(\"SUMMARY\"\
+        , \"\")) == event.title\n                and item.decoded(\"DTSTART\") ==\
+        \ event.start\n                and item.decoded(\"DTEND\") == event.end\n\
+        \                and str(item.get(\"LOCATION\", \"\")) == event.location\n\
+        \                and str(item.get(\"DESCRIPTION\", \"\")) == event.description\n\
+        \            )\n    return False\n\n\ndef update_job(job_id, state, error=\"\
+        \"):\n    with db() as conn:\n        conn.execute(\"UPDATE jobs SET state=?,\
+        \ error=? WHERE id=?\", (state, error, job_id))\n\n\ndef creation_calendar(event):\n\
         \    selected = event.calendar_id or CALENDAR_ID\n    if not selected:\n \
         \       calendars = json.loads(run_bridge(['calendars-json']))\n        if\
         \ len(calendars) != 1:\n            raise operations.OperationError('Select\
@@ -243,7 +250,7 @@ services:
         \  os.chmod(DATA / \"jobs.sqlite\", 0o600)\n    STOP.clear()\n    thread =\
         \ threading.Thread(target=worker, daemon=True)\n    thread.start()\n    yield\n\
         \    STOP.set()\n    WAKE.set()\n    thread.join(timeout=2)\n\n\napp = FastAPI(title=\"\
-        Private Proton Calendar\", version=\"0.2.1\", lifespan=lifespan,\n       \
+        Private Proton Calendar\", version=\"0.2.2\", lifespan=lifespan,\n       \
         \       servers=[{\"url\": PUBLIC_URL}], docs_url=None, redoc_url=None)\n\
         bearer = HTTPBearer(auto_error=False)\n\n\ndef authorize(credentials: HTTPAuthorizationCredentials\
         \ | None = Depends(bearer)):\n    key = secret(\"ACTION_API_KEY\")\n    if\
@@ -314,8 +321,8 @@ services:
         \ of existing events.\n\nKeep the iCalendar object when editing: reconstructing\
         \ only title/time would\nsilently discard reminders, recurrence exceptions\
         \ and provider properties.\n\"\"\"\nimport copy\nimport hashlib\nimport json\n\
-        from datetime import date, datetime, timedelta, timezone\nfrom typing import\
-        \ Literal\nfrom zoneinfo import ZoneInfo\n\nimport recurring_ical_events\n\
+        import re\nfrom datetime import date, datetime, timedelta, timezone\nfrom\
+        \ typing import Literal\nfrom zoneinfo import ZoneInfo\n\nimport recurring_ical_events\n\
         from icalendar import Alarm, Calendar\nfrom pydantic import BaseModel, ConfigDict,\
         \ Field, field_validator, model_validator\n\nCALENDAR_PATTERN = r'^[A-Za-z0-9][A-Za-z0-9_+=-]{0,511}$$'\n\
         \n\nclass OperationError(Exception):\n    \"\"\"A safe error raised before\
@@ -550,10 +557,15 @@ services:
         \            target.add('status', 'CANCELLED')\n        else:\n          \
         \  if 'recurrence' in operation.changes:\n                raise OperationError('An\
         \ occurrence cannot change the series recurrence')\n            target = update_component(target,\
-        \ operation.changes)\n        if not target.get('RECURRENCE-ID'):\n      \
-        \      target.add('recurrence-id', target.decoded('DTSTART'))\n        write_cal\
-        \ = Calendar()\n        write_cal.add('version', '2.0')\n        write_cal.add('prodid',\
-        \ '-//Private Proton Calendar//EN')\n        write_cal.add_component(target)\n\
+        \ operation.changes)\n        # Carbonate increments existing rows, but a\
+        \ new exception has no row\n        # yet. Its sequence must advance beyond\
+        \ the parent, as Proton's client\n        # does when changing an occurrence's\
+        \ schedule.\n        sequence = max(int(master.get('SEQUENCE', 0)), int(target.get('SEQUENCE',\
+        \ 0))) + 1\n        if 'SEQUENCE' in target:\n            del target['SEQUENCE']\n\
+        \        target.add('sequence', sequence)\n        if not target.get('RECURRENCE-ID'):\n\
+        \            target.add('recurrence-id', target.decoded('DTSTART'))\n    \
+        \    write_cal = Calendar()\n        write_cal.add('version', '2.0')\n   \
+        \     write_cal.add('prodid', '-//Private Proton Calendar//EN')\n        write_cal.add_component(target)\n\
         \        expected = target\n    elif operation.kind == 'update_event':\n \
         \       target = master or items[0]\n        update_component(target, operation.changes)\n\
         \        if operation.scope == 'series':\n            shared_changes = {k:v\
@@ -588,41 +600,49 @@ services:
         \            if operation.kind == 'delete_event':\n                verified\
         \ = verified and str(actual.get('STATUS', '')) == 'CANCELLED'\n        if\
         \ not verified:\n            raise ValueError('Verification mismatch')\n \
-        \   except Exception as exc:\n        raise MutationUncertain('Mutation could\
-        \ not be verified. Check Proton before attempting another mutation.') from\
-        \ exc\n    return {'verified': True, 'calendar_id': calendar_id, 'uid': operation.uid,\
-        \ 'scope': operation.scope, 'operation': operation.kind}\n\nCALENDAR_SOURCE\n\
-        COPY <<'CALENDAR_SOURCE' /app/entrypoint.sh\n#!/bin/sh\nset -eu\numask 077\n\
-        if [ -f /run/secrets/bridge_password ]; then\n    CARBONATE_BRIDGE_PASSWORD=$$(cat\
-        \ /run/secrets/bridge_password)\n    export CARBONATE_BRIDGE_PASSWORD\nfi\n\
-        exec \"$$@\"\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE' /app/bootstrap.py\n\
-        \"\"\"Optional TrueNAS YAML startup: create a bridge secret and log in once.\"\
-        \"\"\nimport os\nimport secrets\nimport subprocess\nimport sys\nfrom pathlib\
-        \ import Path\n\n\ndef initialize_bridge(data):\n    data.mkdir(mode=0o700,\
-        \ parents=True, exist_ok=True)\n    path = data / 'bridge_password'\n    if\
-        \ not path.exists():\n        with path.open('x') as out:\n            out.write(secrets.token_urlsafe(48)\
-        \ + '\\n')\n    path.chmod(0o600)\n    os.environ['CARBONATE_BRIDGE_PASSWORD_FILE']\
-        \ = str(path)\n    os.environ['CARBONATE_BRIDGE_PASSWORD'] = path.read_text().strip()\n\
-        \n\ndef login_once(data, interactive=False):\n    if (data / 'auth.json').exists():\n\
-        \        if interactive:\n            print('A session already exists. Stop\
-        \ calendar activity before reauthentication.', file=sys.stderr)\n        \
-        \    return False\n        return True\n    username = os.getenv('PROTON_USERNAME',\
-        \ '')\n    password = os.getenv('PROTON_PASSWORD', '')\n    if not username\
-        \ or (not interactive and not password):\n        print('Proton login is not\
-        \ configured. Set PROTON_USERNAME and PROTON_PASSWORD in the App YAML, or\
-        \ use the App container Shell for interactive login.', file=sys.stderr)\n\
-        \        return False\n    args = ['carbonate', 'auth', username, '-session',\
-        \ str(data / 'auth.json'), '-keep-bridge-password']\n    if interactive:\n\
-        \        return subprocess.run(args, check=False).returncode == 0\n    attempt\
-        \ = os.getenv('PROTON_LOGIN_ATTEMPT', '1')\n    marker = data / 'login_attempt'\n\
-        \    if marker.exists() and marker.read_text() == attempt:\n        print('No\
-        \ automatic login retry. Update the credentials/code and increment PROTON_LOGIN_ATTEMPT\
-        \ in the App YAML to try once again.', file=sys.stderr)\n        return False\n\
-        \    answers = [password]\n    for name in ('PROTON_TWO_FACTOR_CODE', 'PROTON_MAILBOX_PASSWORD'):\n\
-        \        if os.getenv(name):\n            answers.append(os.environ[name])\n\
-        \    if any('\\n' in answer or '\\r' in answer for answer in answers):\n \
-        \       print('Login answers must each be one line.', file=sys.stderr)\n \
-        \       return False\n    marker.write_text(attempt)\n    marker.chmod(0o600)\n\
+        \   except Exception as exc:\n        diagnostic = getattr(exc, 'safe_diagnostic',\
+        \ '')\n        # Bridge diagnostics consist solely of fixed labels or a numeric\
+        \ code.\n        if diagnostic and not (diagnostic in ('bridge command failed',\
+        \ 'bridge unavailable or timed out') or re.fullmatch(r'Proton rejected the\
+        \ write, code [0-9]{3,6}', diagnostic)):\n            diagnostic = ''\n  \
+        \      if not diagnostic and isinstance(exc, ValueError) and str(exc) in ('Verification\
+        \ mismatch', 'Unreadable verification'):\n            diagnostic = str(exc)\n\
+        \        suffix = f' ({diagnostic})' if diagnostic else ''\n        raise\
+        \ MutationUncertain('Mutation could not be verified' + suffix + '. Check Proton\
+        \ before attempting another mutation.') from exc\n    return {'verified':\
+        \ True, 'calendar_id': calendar_id, 'uid': operation.uid, 'scope': operation.scope,\
+        \ 'operation': operation.kind}\n\nCALENDAR_SOURCE\nCOPY <<'CALENDAR_SOURCE'\
+        \ /app/entrypoint.sh\n#!/bin/sh\nset -eu\numask 077\nif [ -f /run/secrets/bridge_password\
+        \ ]; then\n    CARBONATE_BRIDGE_PASSWORD=$$(cat /run/secrets/bridge_password)\n\
+        \    export CARBONATE_BRIDGE_PASSWORD\nfi\nexec \"$$@\"\n\nCALENDAR_SOURCE\n\
+        COPY <<'CALENDAR_SOURCE' /app/bootstrap.py\n\"\"\"Optional TrueNAS YAML startup:\
+        \ create a bridge secret and log in once.\"\"\"\nimport os\nimport secrets\n\
+        import subprocess\nimport sys\nfrom pathlib import Path\n\n\ndef initialize_bridge(data):\n\
+        \    data.mkdir(mode=0o700, parents=True, exist_ok=True)\n    path = data\
+        \ / 'bridge_password'\n    if not path.exists():\n        with path.open('x')\
+        \ as out:\n            out.write(secrets.token_urlsafe(48) + '\\n')\n    path.chmod(0o600)\n\
+        \    os.environ['CARBONATE_BRIDGE_PASSWORD_FILE'] = str(path)\n    os.environ['CARBONATE_BRIDGE_PASSWORD']\
+        \ = path.read_text().strip()\n\n\ndef login_once(data, interactive=False):\n\
+        \    if (data / 'auth.json').exists():\n        if interactive:\n        \
+        \    print('A session already exists. Stop calendar activity before reauthentication.',\
+        \ file=sys.stderr)\n            return False\n        return True\n    username\
+        \ = os.getenv('PROTON_USERNAME', '')\n    password = os.getenv('PROTON_PASSWORD',\
+        \ '')\n    if not username or (not interactive and not password):\n      \
+        \  print('Proton login is not configured. Set PROTON_USERNAME and PROTON_PASSWORD\
+        \ in the App YAML, or use the App container Shell for interactive login.',\
+        \ file=sys.stderr)\n        return False\n    args = ['carbonate', 'auth',\
+        \ username, '-session', str(data / 'auth.json'), '-keep-bridge-password']\n\
+        \    if interactive:\n        return subprocess.run(args, check=False).returncode\
+        \ == 0\n    attempt = os.getenv('PROTON_LOGIN_ATTEMPT', '1')\n    marker =\
+        \ data / 'login_attempt'\n    if marker.exists() and marker.read_text() ==\
+        \ attempt:\n        print('No automatic login retry. Update the credentials/code\
+        \ and increment PROTON_LOGIN_ATTEMPT in the App YAML to try once again.',\
+        \ file=sys.stderr)\n        return False\n    answers = [password]\n    for\
+        \ name in ('PROTON_TWO_FACTOR_CODE', 'PROTON_MAILBOX_PASSWORD'):\n       \
+        \ if os.getenv(name):\n            answers.append(os.environ[name])\n    if\
+        \ any('\\n' in answer or '\\r' in answer for answer in answers):\n       \
+        \ print('Login answers must each be one line.', file=sys.stderr)\n       \
+        \ return False\n    marker.write_text(attempt)\n    marker.chmod(0o600)\n\
         \    try:\n        # Keep login output and credentials out of App logs; manual\
         \ challenges\n        # can be handled interactively in the browser's container\
         \ Shell.\n        result = subprocess.run(args + ['-password-stdin'], input=('\\\

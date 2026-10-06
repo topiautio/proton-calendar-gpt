@@ -17,13 +17,19 @@ silently send guest invitations. Keep the existing Test 2 appointment unchanged.
 
 ## Live checkpoint — 6 October 2026
 
-The owner-private hosted MCP plugin responds and the NAS connection is reachable.
-The owner confirmed that Test 2 appeared in the selected calendar at 13:00–14:00
-Europe/Helsinki. Its job later became `unknown`, so write verification still has a
-defect or timeout to resolve. Read/search and mutation tools beyond creation were
-not exposed by the original plugin. The v0.2 source now implements these tools,
-including recurring series/occurrences and device reminders. Local validation
-passes; the new deployment and live acceptance checks are in progress.
+The private hosted MCP plugin and NAS adapter are reachable. Reconnecting exposed
+the upgraded tools, and regular ChatGPT successfully listed calendars, searched
+and read Test 2. Its original job is now verified through read-only reconciliation.
+Live adapter checks passed timed and all-day creation/rescheduling, reminders,
+weekly creation across DST, and individual/series deletion. All disposable test
+events were removed and Test 2 remains unchanged.
+
+Single-occurrence editing remains unverified; fresh reads showed no exception and
+the original master unchanged. Adapter 0.2.2 adds an exception sequence correction
+and safe diagnostics, with 38 Python tests passing and a successful Docker build.
+It still needs a NAS rebuild and live occurrence edit/cancel tests. Whole-series
+reminder changes and ChatGPT mutation flows also need live acceptance. See
+ACCEPTANCE.md for the precise checkpoint.
 
 Local tests do not establish live Proton compatibility. Completion requires live
 read-back plus explicit edit, recurrence and reminder tests on disposable events.

@@ -125,6 +125,16 @@ def test_bridge_no_shell_and_no_error_leak(monkeypatch):
     assert "secret" not in str(exc.value)
 
 
+def test_bridge_preserves_only_numeric_provider_rejection(monkeypatch):
+    def run(args, **kwargs):
+        return subprocess.CompletedProcess(args, 1, b'', b'Proton rejected the event: secret token (code 2011)')
+    monkeypatch.setattr(module.subprocess, 'run', run)
+    with pytest.raises(module.BridgeError) as error:
+        module.run_bridge(['event', 'put'], b'data')
+    assert error.value.safe_diagnostic == 'Proton rejected the write, code 2011'
+    assert 'secret' not in str(error.value)
+
+
 def test_openapi_has_bearer_and_write_annotation(client):
     spec = client.get("/openapi.json").json()
     post = spec["paths"]["/events"]["post"]

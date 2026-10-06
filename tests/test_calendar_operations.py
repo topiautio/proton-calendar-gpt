@@ -121,6 +121,28 @@ def test_occurrence_move_reedit_cancel_keeps_series():
     assert bridge.events[0].get('RRULE')
 
 
+def test_new_occurrence_advances_parent_sequence():
+    bridge = Bridge(sample(recurrence={'frequency': 'WEEKLY', 'count': 3}, recurrence_timezone='Europe/Helsinki'))
+    bridge.events[0].add('sequence', 7)
+    change(bridge, {'start': '2026-10-26T14:00:00+02:00'}, scope='occurrence', recurrence_id='2026-10-26T09:00:00+02:00')
+    master = next(e for e in bridge.events if not e.get('RECURRENCE-ID'))
+    exception = next(e for e in bridge.events if e.get('RECURRENCE-ID'))
+    assert int(master['SEQUENCE']) == 7
+    assert int(exception['SEQUENCE']) == 8
+
+
+def test_provider_failure_retains_safe_code_without_upstream_text():
+    bridge = Bridge(sample())
+    def rejected(args, content=None):
+        if args[:2] == ['event', 'put']:
+            raise app.BridgeError('secret upstream error', 'Proton rejected the write, code 2011')
+        return bridge(args, content)
+    with pytest.raises(ops.MutationUncertain) as error:
+        change(rejected, {'title': 'Changed'})
+    assert 'code 2011' in str(error.value)
+    assert 'secret' not in str(error.value)
+
+
 def test_series_reminder_changes_apply_to_exceptions():
     bridge = Bridge(sample(recurrence={'frequency':'WEEKLY', 'count':3}, recurrence_timezone='Europe/Helsinki', reminders_minutes=[15]))
     change(bridge, {'title':'Exception'}, scope='occurrence', recurrence_id='2026-10-26T09:00:00+02:00')

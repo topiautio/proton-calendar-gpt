@@ -40,8 +40,30 @@ a fake bridge and cannot establish live compatibility or delivered notifications
 
 ## Checkpoint: 6 October 2026
 
-The original connection is reachable and the owner has confirmed Test 2 in Proton.
-Its old verification job is unknown. The v0.2 backend passes 34 automated tests;
-the plugin passes 10 tests and TypeScript checking, and the Docker image builds.
-The new TrueNAS deployment and live acceptance results remain pending. Record
-actual verified results here after testing; do not infer success from local tests.
+TrueNAS runs adapter 0.2.1. Reconnecting the ChatGPT plugin resolved its stale
+tool catalog. A read-only check in regular ChatGPT successfully used
+`listCalendars`, `listCalendarEvents`, `getCalendarEvent` and
+`getCalendarOperationStatus`: all three calendars were returned, Kalenteri was
+the default, and Test 2 was found/read at its original 13:00–14:00 Helsinki time.
+Its old creation job was reconciled to `verified` without rewriting it.
+
+Authenticated adapter acceptance checks passed:
+
+- Timed creation with a 15-minute device reminder, title edit and rescheduling;
+  the reminder survived a fresh read.
+- Three-occurrence weekly creation with a 30-minute reminder, retaining 09:00
+  Helsinki across the October DST transition.
+- All-day creation with a 60-minute reminder and rescheduling; the exclusive
+  end date remained correct.
+- Verified deletion of all disposable acceptance events, including both whole
+  recurring series. Test 2 was preserved.
+
+Single-occurrence editing returned `unknown` on two disposable series. Fresh
+reads confirmed their masters unchanged, with no saved exception. No uncertain
+write was automatically retried. Occurrence cancellation and reminder edits
+across existing exceptions have not passed live acceptance. The source for
+adapter 0.2.2 advances new exception sequences beyond the parent and exposes only
+fixed failure labels/numeric provider codes, never raw upstream error text.
+Its 38 Python tests and Docker build pass; the generated YAML parses. It awaits
+deployment and live recurrence acceptance. Plugin mutation flows and actual
+notification delivery also require end-to-end confirmation.

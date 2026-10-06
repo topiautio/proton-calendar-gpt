@@ -6,6 +6,7 @@ silently discard reminders, recurrence exceptions and provider properties.
 import copy
 import hashlib
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -361,6 +362,13 @@ def execute(operation, bridge, default_calendar):
             if 'recurrence' in operation.changes:
                 raise OperationError('An occurrence cannot change the series recurrence')
             target = update_component(target, operation.changes)
+        # Carbonate increments existing rows, but a new exception has no row
+        # yet. Its sequence must advance beyond the parent, as Proton's client
+        # does when changing an occurrence's schedule.
+        sequence = max(int(master.get('SEQUENCE', 0)), int(target.get('SEQUENCE', 0))) + 1
+        if 'SEQUENCE' in target:
+            del target['SEQUENCE']
+        target.add('sequence', sequence)
         if not target.get('RECURRENCE-ID'):
             target.add('recurrence-id', target.decoded('DTSTART'))
         write_cal = Calendar()
@@ -410,5 +418,12 @@ def execute(operation, bridge, default_calendar):
         if not verified:
             raise ValueError('Verification mismatch')
     except Exception as exc:
-        raise MutationUncertain('Mutation could not be verified. Check Proton before attempting another mutation.') from exc
+        diagnostic = getattr(exc, 'safe_diagnostic', '')
+        # Bridge diagnostics consist solely of fixed labels or a numeric code.
+        if diagnostic and not (diagnostic in ('bridge command failed', 'bridge unavailable or timed out') or re.fullmatch(r'Proton rejected the write, code [0-9]{3,6}', diagnostic)):
+            diagnostic = ''
+        if not diagnostic and isinstance(exc, ValueError) and str(exc) in ('Verification mismatch', 'Unreadable verification'):
+            diagnostic = str(exc)
+        suffix = f' ({diagnostic})' if diagnostic else ''
+        raise MutationUncertain('Mutation could not be verified' + suffix + '. Check Proton before attempting another mutation.') from exc
     return {'verified': True, 'calendar_id': calendar_id, 'uid': operation.uid, 'scope': operation.scope, 'operation': operation.kind}

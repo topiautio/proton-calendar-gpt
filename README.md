@@ -6,7 +6,7 @@ The current flow is: **ChatGPT on your Pixel → private Site-hosted MCP plugin 
 
 For your intended TrueNAS installation, start with [Install via YAML](truenas/README.md). The YAML embeds the image build, storage initialization and login setup, so normal installation needs no SSH or manually prepared files. Set the environment values in TrueNAS Apps; Proton challenges may need the browser-based container Shell. Sections 1–3 below document the optional shell Compose installation and networking details; do not run that stack alongside the TrueNAS App.
 
-**Status:** the original live connection and event creation have been confirmed. The v0.2 read/edit/recurrence/reminder upgrade passes local tests and still needs deployment and live acceptance tests. Carbonate uses an unsupported private Proton API and may break. Its pinned commit is `baa9818402e980208ac0041ea6544f3d4683d29d`. A live create-and-read-back test is required before relying on this for appointments.
+**Status:** private development release; the completion target is not yet met. ChatGPT now lists calendars, searches events and reads event details after reconnecting the plugin. Live adapter checks verified timed/all-day creation and rescheduling, device-reminder read-back, weekly recurrence across DST, and deletion of individual events and whole series. Editing a single recurring occurrence remains unverified. Adapter 0.2.2 advances exception sequences and adds safe failure diagnostics; deployment and live occurrence checks are pending. See [ACCEPTANCE.md](ACCEPTANCE.md). Carbonate uses an unsupported private Proton API and may break. Its pinned commit is `baa9818402e980208ac0041ea6544f3d4683d29d`.
 
 ## 1. Optional shell Compose installation: prepare on TrueNAS
 

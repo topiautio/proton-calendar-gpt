@@ -134,7 +134,9 @@ def make_ics(event, uid):
 
 
 class BridgeError(Exception):
-    pass
+    def __init__(self, message, safe_diagnostic=''):
+        super().__init__(message)
+        self.safe_diagnostic = safe_diagnostic
 
 
 class CalendarContext(BaseModel):
@@ -144,7 +146,7 @@ class CalendarContext(BaseModel):
     provider: str
     login_configured: bool
     api_version: int = 2
-    adapter_version: str = "0.2.1"
+    adapter_version: str = "0.2.2"
     selected_calendar_id: str
     capabilities: list[str]
 
@@ -168,10 +170,16 @@ def run_bridge(args, content=None):
             input=content, capture_output=True, timeout=90, env=env,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
-        raise BridgeError("Bridge unavailable or timed out") from exc
+        raise BridgeError("Bridge unavailable or timed out", 'bridge unavailable or timed out') from exc
     if result.returncode:
         # Never send upstream errors, tokens, or account data to the API client.
-        raise BridgeError("Bridge command failed; check login and calendar configuration")
+        # Retain only the numeric code in Carbonate's known rejection format.
+        # Never expose the accompanying upstream text, tokens or calendar data.
+        match = re.search(rb'Proton rejected (?:the event|the request)[^\r\n]*\(code ([0-9]{3,6})\)', result.stderr)
+        diagnostic = 'bridge command failed'
+        if match:
+            diagnostic = 'Proton rejected the write, code ' + match[1].decode('ascii')
+        raise BridgeError("Bridge command failed; check login and calendar configuration", diagnostic)
     return result.stdout.decode("utf-8", errors="strict")
 
 
@@ -303,7 +311,7 @@ async def lifespan(app):
     thread.join(timeout=2)
 
 
-app = FastAPI(title="Private Proton Calendar", version="0.2.1", lifespan=lifespan,
+app = FastAPI(title="Private Proton Calendar", version="0.2.2", lifespan=lifespan,
               servers=[{"url": PUBLIC_URL}], docs_url=None, redoc_url=None)
 bearer = HTTPBearer(auto_error=False)
 
