@@ -186,3 +186,15 @@ def test_readonly_reconciliation_does_not_rewrite(client, monkeypatch):
     assert app.operation_status(task['operation_id'])['result']['verified']
     assert app.get_status(job['job_id'])['state'] == 'verified'
     assert not any(a[0] == 'event' for a, _ in bridge.calls)
+
+
+def test_occurrence_verification_rejects_missing_master():
+    bridge = Bridge(sample(recurrence={'frequency':'WEEKLY', 'count':3}, recurrence_timezone='Europe/Helsinki'))
+    def lossy(args, content=None):
+        result = bridge(args, content)
+        if content:
+            bridge.events = [i for i in bridge.events if i.get('RECURRENCE-ID')]
+        return result
+    revision = read(bridge)['revision']
+    with pytest.raises(ops.MutationUncertain):
+        ops.execute(ops.CalendarOperation(kind='update_event', uid='fixture@calendar', expected_revision=revision, scope='occurrence', recurrence_id='2026-10-26T09:00:00+02:00', changes={'title':'Moved'}), lossy, CAL)

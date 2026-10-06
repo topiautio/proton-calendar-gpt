@@ -145,36 +145,37 @@ services:
         \    cal.add_component(item)\n    return cal.to_ical()\n\n\nclass BridgeError(Exception):\n\
         \    pass\n\n\nclass CalendarContext(BaseModel):\n    now: str\n    timezone:\
         \ str\n    default_duration_minutes: int\n    provider: str\n    login_configured:\
-        \ bool\n    api_version: int = 2\n    selected_calendar_id: str\n    capabilities:\
-        \ list[str]\n\n\nclass EventStatus(BaseModel):\n    job_id: str\n    state:\
-        \ str = Field(description=\"pending, writing, verified, or unknown. Only verified\
-        \ confirms a saved event.\")\n    event: dict\n    error: str\n    calendar_url:\
-        \ str\n    poll_after_seconds: int\n\n\ndef run_bridge(args, content=None):\n\
-        \    env = os.environ.copy()\n    env[\"CARBONATE_BRIDGE_PASSWORD\"] = secret(\"\
-        CARBONATE_BRIDGE_PASSWORD\")\n    env[\"CARBONATE_NO_INVITATIONS\"] = \"1\"\
-        \n    try:\n        result = subprocess.run(\n            [\"carbonate\",\
-        \ *args, \"-session\", str(DATA / \"auth.json\")],\n            input=content,\
-        \ capture_output=True, timeout=90, env=env,\n        )\n    except (subprocess.TimeoutExpired,\
-        \ OSError) as exc:\n        raise BridgeError(\"Bridge unavailable or timed\
-        \ out\") from exc\n    if result.returncode:\n        # Never send upstream\
-        \ errors, tokens, or account data to the API client.\n        raise BridgeError(\"\
-        Bridge command failed; check login and calendar configuration\")\n    return\
-        \ result.stdout.decode(\"utf-8\", errors=\"strict\")\n\n\ndef verified_in_output(output,\
-        \ event, uid):\n    # Carbonate's calendars --ics indents each iCalendar line\
-        \ with '    | '.\n    lines = [line[6:] for line in output.splitlines() if\
-        \ line.startswith(\"    | \")]\n    text = \"\\r\\n\".join(lines) + \"\\r\\\
-        n\"\n    # Each event is a separate VCALENDAR; parse independently.\n    blocks\
-        \ = re.findall(r\"BEGIN:VCALENDAR\\r\\n.*?END:VCALENDAR\", text, re.S)\n \
-        \   for block in blocks:\n        for item in Calendar.from_ical(block).walk(\"\
-        VEVENT\"):\n            if str(item.get(\"UID\", \"\")) != uid:\n        \
-        \        continue\n            return (\n                str(item.get(\"SUMMARY\"\
-        , \"\")) == event.title\n                and item.decoded(\"DTSTART\") ==\
-        \ event.start\n                and item.decoded(\"DTEND\") == event.end\n\
-        \                and str(item.get(\"LOCATION\", \"\")) == event.location\n\
-        \                and str(item.get(\"DESCRIPTION\", \"\")) == event.description\n\
-        \            )\n    return False\n\n\ndef update_job(job_id, state, error=\"\
-        \"):\n    with db() as conn:\n        conn.execute(\"UPDATE jobs SET state=?,\
-        \ error=? WHERE id=?\", (state, error, job_id))\n\n\ndef creation_calendar(event):\n\
+        \ bool\n    api_version: int = 2\n    adapter_version: str = \"0.2.1\"\n \
+        \   selected_calendar_id: str\n    capabilities: list[str]\n\n\nclass EventStatus(BaseModel):\n\
+        \    job_id: str\n    state: str = Field(description=\"pending, writing, verified,\
+        \ or unknown. Only verified confirms a saved event.\")\n    event: dict\n\
+        \    error: str\n    calendar_url: str\n    poll_after_seconds: int\n\n\n\
+        def run_bridge(args, content=None):\n    env = os.environ.copy()\n    env[\"\
+        CARBONATE_BRIDGE_PASSWORD\"] = secret(\"CARBONATE_BRIDGE_PASSWORD\")\n   \
+        \ env[\"CARBONATE_NO_INVITATIONS\"] = \"1\"\n    try:\n        result = subprocess.run(\n\
+        \            [\"carbonate\", *args, \"-session\", str(DATA / \"auth.json\"\
+        )],\n            input=content, capture_output=True, timeout=90, env=env,\n\
+        \        )\n    except (subprocess.TimeoutExpired, OSError) as exc:\n    \
+        \    raise BridgeError(\"Bridge unavailable or timed out\") from exc\n   \
+        \ if result.returncode:\n        # Never send upstream errors, tokens, or\
+        \ account data to the API client.\n        raise BridgeError(\"Bridge command\
+        \ failed; check login and calendar configuration\")\n    return result.stdout.decode(\"\
+        utf-8\", errors=\"strict\")\n\n\ndef verified_in_output(output, event, uid):\n\
+        \    # Carbonate's calendars --ics indents each iCalendar line with '    |\
+        \ '.\n    lines = [line[6:] for line in output.splitlines() if line.startswith(\"\
+        \    | \")]\n    text = \"\\r\\n\".join(lines) + \"\\r\\n\"\n    # Each event\
+        \ is a separate VCALENDAR; parse independently.\n    blocks = re.findall(r\"\
+        BEGIN:VCALENDAR\\r\\n.*?END:VCALENDAR\", text, re.S)\n    for block in blocks:\n\
+        \        for item in Calendar.from_ical(block).walk(\"VEVENT\"):\n       \
+        \     if str(item.get(\"UID\", \"\")) != uid:\n                continue\n\
+        \            return (\n                str(item.get(\"SUMMARY\", \"\")) ==\
+        \ event.title\n                and item.decoded(\"DTSTART\") == event.start\n\
+        \                and item.decoded(\"DTEND\") == event.end\n              \
+        \  and str(item.get(\"LOCATION\", \"\")) == event.location\n             \
+        \   and str(item.get(\"DESCRIPTION\", \"\")) == event.description\n      \
+        \      )\n    return False\n\n\ndef update_job(job_id, state, error=\"\"):\n\
+        \    with db() as conn:\n        conn.execute(\"UPDATE jobs SET state=?, error=?\
+        \ WHERE id=?\", (state, error, job_id))\n\n\ndef creation_calendar(event):\n\
         \    selected = event.calendar_id or CALENDAR_ID\n    if not selected:\n \
         \       calendars = json.loads(run_bridge(['calendars-json']))\n        if\
         \ len(calendars) != 1:\n            raise operations.OperationError('Select\
@@ -242,7 +243,7 @@ services:
         \  os.chmod(DATA / \"jobs.sqlite\", 0o600)\n    STOP.clear()\n    thread =\
         \ threading.Thread(target=worker, daemon=True)\n    thread.start()\n    yield\n\
         \    STOP.set()\n    WAKE.set()\n    thread.join(timeout=2)\n\n\napp = FastAPI(title=\"\
-        Private Proton Calendar\", version=\"0.2.0\", lifespan=lifespan,\n       \
+        Private Proton Calendar\", version=\"0.2.1\", lifespan=lifespan,\n       \
         \       servers=[{\"url\": PUBLIC_URL}], docs_url=None, redoc_url=None)\n\
         bearer = HTTPBearer(auto_error=False)\n\n\ndef authorize(credentials: HTTPAuthorizationCredentials\
         \ | None = Depends(bearer)):\n    key = secret(\"ACTION_API_KEY\")\n    if\
