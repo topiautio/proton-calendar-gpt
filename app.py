@@ -19,6 +19,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from icalendar import Calendar, Event
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 import calendar_operations as operations
+import claude_connector
 
 DATA = Path(os.getenv("DATA_DIR", "/data"))
 TZ = os.getenv("CALENDAR_TIMEZONE", "Europe/Helsinki")
@@ -146,7 +147,7 @@ class CalendarContext(BaseModel):
     provider: str
     login_configured: bool
     api_version: int = 2
-    adapter_version: str = "0.2.4"
+    adapter_version: str = "0.3.0"
     selected_calendar_id: str
     capabilities: list[str]
 
@@ -313,6 +314,7 @@ async def lifespan(app):
         conn.execute("UPDATE jobs SET state='unknown', error='Server restarted during the write. Check Proton Calendar; no automatic retry was made.' WHERE state='writing'")
         conn.execute("CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, payload TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '', created REAL NOT NULL)")
         conn.execute("UPDATE operations SET state='unknown', error='Server restarted during an operation. Read Proton before retrying; no mutation was retried.' WHERE state='running'")
+        claude_connector.init_db(conn)
     os.chmod(DATA / "jobs.sqlite", 0o600)
     STOP.clear()
     thread = threading.Thread(target=worker, daemon=True)
@@ -323,8 +325,9 @@ async def lifespan(app):
     thread.join(timeout=2)
 
 
-app = FastAPI(title="Private Proton Calendar", version="0.2.4", lifespan=lifespan,
+app = FastAPI(title="Private Proton Calendar", version="0.3.0", lifespan=lifespan,
               servers=[{"url": PUBLIC_URL}], docs_url=None, redoc_url=None)
+app.include_router(claude_connector.router)
 bearer = HTTPBearer(auto_error=False)
 
 

@@ -15,7 +15,7 @@ COPY --from=bridge /out/carbonate /usr/local/bin/carbonate
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py calendar_operations.py entrypoint.sh ./
+COPY app.py calendar_operations.py claude_connector.py entrypoint.sh ./
 RUN chmod 755 /app/entrypoint.sh
 USER 10001:10001
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1

@@ -104,3 +104,23 @@ The phone test is retained until this is resolved; Test 2 remains unchanged.
 Notification delivery and the adapter capabilities have passed. The release is
 not marked complete until the remaining ChatGPT mutation/cleanup check resolves.
 Attendee invitations are intentionally outside this agreed first-version scope.
+
+## Checkpoint: 10 October 2026 — Claude connector
+
+TrueNAS runs adapter 0.3.0, deployed by replacing only the embedded build block
+in the existing App YAML (about 40 KB; environment settings unchanged). The
+adapter now serves a remote MCP endpoint at `/mcp` with single-owner OAuth
+(dynamic client registration, PKCE S256, approval with `ACTION_API_KEY`).
+
+Verified live through claude.ai with the custom connector My Proton Calendar:
+
+- claude.ai detected OAuth and dynamic registration automatically; the owner
+  approved on the NAS page and all eleven tools were listed.
+- Creating disposable event "Claude connector test" (11 October 12:00–12:30
+  Helsinki) progressed pending → writing → verified.
+- The same chat found it with listCalendarEvents, read its revision and deleted
+  it with scope `event`; the deletion reached ready with `verified: true`. No
+  other events were touched.
+
+Forty-nine Python tests pass, including the OAuth and MCP flow. The official MCP
+Python SDK client completed discovery, registration, PKCE and tool calls locally.

@@ -27,7 +27,7 @@ for old, new in [
     ('COPY bridge-calendar-query.go /src/internal/calendar/query.go\n', embedded('bridge-calendar-query.go', '/src/internal/calendar/query.go')),
     ('COPY carbonate-cli.patch /tmp/carbonate-cli.patch\n', embedded('carbonate-cli.patch', '/tmp/carbonate-cli.patch')),
     ('COPY requirements.txt .\n', embedded('requirements.txt', '/app/requirements.txt')),
-    ('COPY app.py calendar_operations.py entrypoint.sh ./\n', embedded('app.py', '/app/app.py') + embedded('calendar_operations.py', '/app/calendar_operations.py') + embedded('entrypoint.sh', '/app/entrypoint.sh') + embedded('bootstrap.py', '/app/bootstrap.py')),
+    ('COPY app.py calendar_operations.py claude_connector.py entrypoint.sh ./\n', embedded('app.py', '/app/app.py') + embedded('calendar_operations.py', '/app/calendar_operations.py') + embedded('claude_connector.py', '/app/claude_connector.py') + embedded('entrypoint.sh', '/app/entrypoint.sh') + embedded('bootstrap.py', '/app/bootstrap.py')),
 ]:
     assert old in dockerfile
     dockerfile = dockerfile.replace(old, new)

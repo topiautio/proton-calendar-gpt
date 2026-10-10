@@ -69,6 +69,10 @@ python /app/bootstrap.py --interactive-login
 
 Complete Proton's prompts there. This helper refuses to replace an existing session. It reuses the generated bridge password, so there is no password-file copying step. If the account has multiple calendars, use that same browser container Shell to run `carbonate calendars -session /data/auth.json` and set the intended ID in the YAML.
 
+## Connect Claude
+
+After `/healthz` works publicly, add `https://YOUR_PUBLIC_HOST/mcp` as a custom connector in claude.ai (**Settings → Connectors → Add custom connector**). On the NAS approval page, approve with `ACTION_API_KEY`. The connector then also works in the Claude Android app. No hosted Site or extra settings are needed. See section 4b of the main README for details. Changing `ACTION_API_KEY` revokes all Claude connections.
+
 ## Connect the ChatGPT plugin
 
 1. Check the App logs and verify `https://YOUR_PUBLIC_HOST/healthz` from outside your home network with Tailscale disconnected on the testing device. This health check verifies the adapter, not Proton login.

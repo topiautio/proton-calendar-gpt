@@ -6,7 +6,7 @@ The current flow is: **ChatGPT on your Pixel → private Site-hosted MCP plugin 
 
 For your intended TrueNAS installation, start with [Install via YAML](truenas/README.md). The YAML embeds the image build, storage initialization and login setup, so normal installation needs no SSH or manually prepared files. Set the environment values in TrueNAS Apps; Proton challenges may need the browser-based container Shell. Sections 1–3 below document the optional shell Compose installation and networking details; do not run that stack alongside the TrueNAS App.
 
-**Status:** private development release; the completion target is not yet met. ChatGPT now lists calendars, searches events and reads event details after reconnecting the plugin. Live checks verified timed/all-day creation and rescheduling, device-reminder read-back and editing, weekly recurrence across DST, and deletion of individual events and whole series. Adapter 0.2.4 is deployed: single-occurrence editing, cancellation and reminders on both the master and exception now pass live verification. Phone notification delivery is confirmed and improved ChatGPT polling is deployed. A final ChatGPT edit/cleanup check is awaiting resolution of a host action that returned no result. See [ACCEPTANCE.md](ACCEPTANCE.md). Carbonate uses an unsupported private Proton API and may break. Its pinned commit is `baa9818402e980208ac0041ea6544f3d4683d29d`.
+**Status:** private development release; the completion target is not yet met. ChatGPT now lists calendars, searches events and reads event details after reconnecting the plugin. Live checks verified timed/all-day creation and rescheduling, device-reminder read-back and editing, weekly recurrence across DST, and deletion of individual events and whole series. Adapter 0.2.4 is deployed: single-occurrence editing, cancellation and reminders on both the master and exception now pass live verification. Phone notification delivery is confirmed and improved ChatGPT polling is deployed. Adapter 0.3.0 adds a Claude connector (section 4b); it passes local OAuth and MCP SDK tests but still needs a live check from claude.ai. A final ChatGPT edit/cleanup check is awaiting resolution of a host action that returned no result. See [ACCEPTANCE.md](ACCEPTANCE.md). Carbonate uses an unsupported private Proton API and may break. Its pinned commit is `baa9818402e980208ac0041ea6544f3d4683d29d`.
 
 ## 1. Optional shell Compose installation: prepare on TrueNAS
 
@@ -111,6 +111,19 @@ Sites handles OAuth between ChatGPT and the hosted plugin. The hosted plugin cal
 After publishing new plugin tools, an existing ChatGPT connection can retain its old tool list. In this installation, disconnecting and reconnecting My Proton Calendar, then starting a new chat, exposed the upgraded tools. Rebuilding the NAS alone does not refresh ChatGPT's tool catalog.
 
 The [original custom GPT Action setup](custom-gpt-alternative.md) remains an optional alternative. Its confirmation flags apply only to that route; plugin actions follow the host’s permission controls.
+
+## 4b. Connect Claude (claude.ai, Android app, Desktop and Code)
+
+Adapter 0.3.0 also serves a remote MCP connector at `https://YOUR_PUBLIC_HOST/mcp` with the same tools. Claude talks to the NAS directly; the ChatGPT Site is not involved, and both can be connected at the same time. `PUBLIC_URL` must be the exact public HTTPS origin, because the OAuth metadata is built from it.
+
+1. Deploy the updated App YAML and check `https://YOUR_PUBLIC_HOST/healthz` from outside your network.
+2. In claude.ai on the web, open **Settings → Connectors → Add custom connector**. Name it `My Proton Calendar` and enter `https://YOUR_PUBLIC_HOST/mcp` as the URL. Leave the advanced OAuth fields empty.
+3. Claude opens an approval page served by your NAS. Paste `ACTION_API_KEY` from your password manager and choose **Approve**. Approve only a connection you started yourself just now: approval grants access to the Claude account that started it.
+4. Connectors added on claude.ai also appear in the Claude Android app. In a chat, enable the connector from the tools menu and ask it to run `getIntegrationStatus`, then `getCalendarContext`.
+
+For Claude Code, run `claude mcp add --transport http proton-calendar https://YOUR_PUBLIC_HOST/mcp`, then authenticate it from `/mcp`. Claude Desktop uses the same custom-connector flow as claude.ai.
+
+Security model: one owner, no user accounts. Registration accepts only Claude's callback URLs and loopback redirects (`OAUTH_EXTRA_REDIRECT_URIS` adds others, comma separated). PKCE is required. The approval page allows five wrong keys per 15 minutes. Access tokens last one hour; refresh tokens last 60 days and rotate on use. Only hashes of tokens are stored, in `jobs.sqlite`. **Changing `ACTION_API_KEY` revokes every Claude connection.** The adapter key also works directly as a bearer token on `/mcp`. Claude asks for tool permissions under its own settings; the instructions not to retry unknown writes or to follow calendar text still apply.
 
 ## 5. Verify before everyday use
 
