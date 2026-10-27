@@ -1,16 +1,87 @@
-# Private Proton Calendar assistant
+# proton-calendar-gpt
 
-Private ChatGPT plugin for reading and managing Proton Calendar from natural language. The Docker adapter runs as a TrueNAS App while your computer is off. It does not call OpenAI’s paid API; no OpenAI API key is needed.
+A self-hosted adapter that lets Claude and ChatGPT read and manage a Proton Calendar from natural language: "I have school tomorrow at 9:45", "move Friday's dentist to 14:00", "cancel next week's training".
 
-The current flow is: **ChatGPT on your Pixel → private Site-hosted MCP plugin → authenticated public HTTPS endpoint on your NAS → Docker adapter → experimental Carbonate bridge → Proton Calendar**. Use the installed plugin from an ordinary ChatGPT chat. You do not need to create a custom GPT.
+It runs as a single Docker service on a home server, for example as a TrueNAS App, so it keeps working while your computer is off. Claude connects to it directly as a remote MCP connector. ChatGPT connects through a small plugin hosted on ChatGPT Sites. No OpenAI or Anthropic API key is needed.
 
-For your intended TrueNAS installation, start with [Install via YAML](truenas/README.md). The YAML embeds the image build, storage initialization and login setup, so normal installation needs no SSH or manually prepared files. Set the environment values in TrueNAS Apps; Proton challenges may need the browser-based container Shell. Sections 1–3 below document the optional shell Compose installation and networking details; do not run that stack alongside the TrueNAS App.
+> **Unofficial.** Not affiliated with or endorsed by Proton. The adapter talks to Proton through [Carbonate](https://github.com/develonrails/carbonate), a third-party bridge that uses Proton's private, unsupported API, so it can break without notice. Each deployment serves one person's Proton account; it is not a multi-user service.
 
-**Status:** private development release; the completion target is not yet met. ChatGPT now lists calendars, searches events and reads event details after reconnecting the plugin. Live checks verified timed/all-day creation and rescheduling, device-reminder read-back and editing, weekly recurrence across DST, and deletion of individual events and whole series. Adapter 0.2.4 is deployed: single-occurrence editing, cancellation and reminders on both the master and exception now pass live verification. Phone notification delivery is confirmed and improved ChatGPT polling is deployed. Adapter 0.3.0 adds a Claude connector (section 4b); it passes local OAuth and MCP SDK tests but still needs a live check from claude.ai. A final ChatGPT edit/cleanup check is awaiting resolution of a host action that returned no result. See [ACCEPTANCE.md](ACCEPTANCE.md). Carbonate uses an unsupported private Proton API and may break. Its pinned commit is `baa9818402e980208ac0041ea6544f3d4683d29d`.
+## How it works
 
-## 1. Optional shell Compose installation: prepare on TrueNAS
+```mermaid
+flowchart LR
+    Claude["Claude<br/>web, desktop, mobile, Code"]
+    ChatGPT["ChatGPT"] --> Plugin["ChatGPT Sites plugin<br/>calendar-plugin/"]
+    subgraph Server["Your server: TrueNAS App or Docker Compose"]
+        Edge["Public HTTPS<br/>Tailscale Funnel or Caddy"] --> Adapter["FastAPI adapter<br/>job queue + read-back verification"]
+        Adapter --> Bridge["Carbonate bridge<br/>pinned and patched"]
+    end
+    Claude -- "MCP, OAuth with PKCE" --> Edge
+    Plugin -- "HTTPS, API key" --> Edge
+    Bridge -- "Proton API" --> Proton["Proton Calendar"]
+```
 
-Copy this folder into a dedicated dataset, for example `/mnt/POOL/apps/proton-calendar-gpt`. Replace `POOL` with your pool name in all commands. Use the TrueNAS shell or SSH; don't install Python packages on the NAS host. `setup.py` uses only Python's standard library.
+- **Adapter** (`app.py`, `calendar_operations.py`, `claude_connector.py`): a FastAPI service with a durable SQLite job queue. Every write is read back from Proton and compared before it is reported as `verified`.
+- **Bridge**: Carbonate built from a pinned commit, plus a small patch (`carbonate-cli.patch`, `bridge-calendar-*.go`) that adds machine-readable calendar and event reads.
+- **Claude connector**: a remote MCP endpoint at `/mcp` with single-owner OAuth.
+- **ChatGPT plugin** (`calendar-plugin/`): MCP tools hosted on ChatGPT Sites that forward to the adapter with its API key.
+- **Deployment**: self-contained TrueNAS Apps YAML files (`truenas/`) or plain Docker Compose files with Caddy or Tailscale Funnel for public HTTPS.
+
+## Features
+
+- List calendars, search events and list occurrences in a date range of up to 366 days.
+- Create timed and all-day events; all-day end dates are exclusive.
+- Edit, reschedule or delete an event after reading its current revision. Fields you don't mention, existing reminders and provider properties are preserved.
+- Daily, weekly, monthly and yearly recurrence with intervals, counts, end dates and weekdays (all-day series use a count). Timed series keep their local start time across daylight-saving changes.
+- Edit a whole series or a single occurrence, and cancel one occurrence without deleting the series.
+- Add, replace, remove and read up to five device reminders per event.
+- Duplicate protection: repeating an identical request returns the original job instead of creating a second event.
+
+Out of scope: sending invitations, editing events with attendees (they are read-only), calendar sharing and creating email reminders.
+
+## Security design
+
+The adapter holds a live Proton session, so it is built to expose as little as possible:
+
+- **Hardened container.** Runs as an unprivileged user (UID 10001) on a read-only root filesystem, with all Linux capabilities dropped, `no-new-privileges`, a size-limited `/tmp` and no Docker socket. The adapter's port is never published beyond localhost; only the chosen HTTPS front end is reachable from outside.
+- **Authenticated API.** Every calendar operation needs the adapter's API key. Only `/healthz` and the API schema are public, and they contain no secrets or events.
+- **Single-owner OAuth for Claude.** Dynamic client registration accepts only Claude's callback URLs and loopback redirects. PKCE is required. The approval page allows five wrong keys per 15 minutes. Access tokens last one hour; refresh tokens last 60 days and rotate on every use. Only token hashes are stored. Changing the API key revokes every connection.
+- **Safe writes.** Mutations need the event's current revision, so stale edits are rejected. A write whose outcome is uncertain is reported as `unknown` and never retried automatically; it can be reconciled with a read-only check instead.
+- **Prompt-injection guidance.** The assistant instructions treat event titles, descriptions and API responses as data, never as commands.
+- **Credential handling.** The Proton password is only needed for the first login and should be removed from the configuration afterwards. Errors returned to the assistant are generic and never include Proton output or credentials.
+
+Limits worth knowing: the Proton session is broader than a calendar-only token, and anyone with administrator access to the server or its backups can read decrypted calendar data.
+
+## Status
+
+Adapter 0.3.0. Tested in October 2026 against a real Proton account, directly through the adapter and through both assistants:
+
+- Timed and all-day creation, rescheduling and deletion, for single events and whole series.
+- Weekly recurrence across the October daylight-saving change, single-occurrence edits and cancellations.
+- Device reminders on series and their exceptions, including delivery of a notification to an Android phone.
+- Duplicate protection, and the Proton session surviving App rebuilds.
+- ChatGPT: listing calendars, searching and reading events, and creating and editing a recurring series.
+- Claude on claude.ai: OAuth discovery and approval, then creating, finding and deleting an event.
+
+One ChatGPT check is still open: a final edit and cleanup request returned no result from the ChatGPT host. See [ACCEPTANCE.md](ACCEPTANCE.md) for the full checklist and findings, and [ROADMAP.md](ROADMAP.md) for the completion target.
+
+## Setup
+
+You need a server that runs Docker, a way to give it a public HTTPS address, and a Proton account. Run exactly one adapter per Proton session.
+
+### Option A: TrueNAS App (recommended)
+
+Follow [the TrueNAS Apps YAML guide](truenas/README.md). Each YAML file embeds the image build, storage setup and login, so the normal installation needs no SSH or prepared files:
+
+- [Tailscale Funnel](truenas/funnel.yaml): no router port forwarding.
+- [DDNS with Caddy](truenas/ddns.yaml): forward ports 80 and 443 to the server.
+- [Existing reverse proxy](truenas/existing-proxy.yaml): bring your own proxy.
+
+### Option B: Docker Compose
+
+Do not run this alongside the TrueNAS App.
+
+**1. Prepare.** Copy this repository into a dedicated directory or dataset, for example `/mnt/POOL/apps/proton-calendar-gpt`, then run:
 
 ```sh
 cd /mnt/POOL/apps/proton-calendar-gpt
@@ -18,151 +89,109 @@ sudo python3 setup.py
 sudo docker compose build
 ```
 
-The adapter runs as UID/GID 10001. If dataset ACLs block it, grant that identity access to this dedicated dataset. Preserve the permissions set by setup. Never use a shared world-readable dataset for the session or secrets. Nothing here needs the Docker socket mounted into a container.
+`setup.py` uses only Python's standard library and never overwrites existing files. It creates `data/` and `secrets/` (mode 700, owned by UID/GID 10001), a random adapter API key in `secrets/action_api_key`, an empty `secrets/bridge_password` and a `.env` file. Never put these on a shared, world-readable dataset. Builds use pinned Carbonate and Python package versions.
 
-Builds use pinned Carbonate source and Python package versions. Container base tags follow their maintenance lines. Production operators can pin image digests after validating an update. Run exactly one adapter instance/worker for this session.
-
-## 2. Log into Proton on the NAS
-
-Do this before starting the web adapter:
+**2. Log in to Proton.** Before starting the web adapter, run:
 
 ```sh
 sudo docker compose run --rm --no-deps calendar carbonate auth YOUR_PROTON_USERNAME -session /data/auth.json
 ```
 
-Enter your Proton password and second factor interactively **in this terminal**, never in ChatGPT. Human verification, if requested by Proton, may require additional manual steps. The bridge prints a new bridge password once. Store it in your password manager and use a local editor to replace the empty `secrets/bridge_password` file with that password. Keep ownership 10001:10001 and mode 600. This is different from your Proton password and the Action API key.
+Enter your Proton password and second factor in this terminal, never in a chat. Proton may ask for human verification. The bridge prints a new bridge password once: store it in your password manager and replace the empty `secrets/bridge_password` with it, keeping owner 10001:10001 and mode 600. It is different from both your Proton password and the adapter API key.
 
-The default works when your account has exactly one calendar. With multiple calendars run the command below and set `PROTON_CALENDAR_ID` in `.env` to the intended calendar's printed ID. Our image adds machine-readable calendar and targeted event reads to the pinned bridge. It preserves the upstream Proton authentication and event-write implementation. Without an ID, the bridge refuses writes to accounts with multiple calendars. For an isolated trial, you can use a separate Proton account with disposable test events.
+If your account has more than one calendar, list them and set `PROTON_CALENDAR_ID` in `.env`. Without it, the bridge refuses writes to multi-calendar accounts.
 
 ```sh
 sudo docker compose run --rm --no-deps calendar carbonate calendars -session /data/auth.json
 ```
 
-Your session and locally queued event details are retained in `data/`. NAS administrators and software with access to the bridge secrets can access decrypted calendar information. Backups of this dataset also contain sensitive data. The adapter does not expose email or contacts through the plugin, but the underlying Proton session is broader than a narrowly scoped official calendar token.
+**3. Choose one public HTTPS connection.** The ChatGPT plugin and Claude call the adapter from the cloud, so it needs public HTTPS on port 443 with a valid certificate. A private Tailscale address won't work.
 
-## 3. Choose one HTTPS connection
-
-The hosted plugin calls your NAS from the cloud, not from your phone’s Tailscale connection. A private `100.x` address or private Tailscale Serve URL will not work for this connection. The endpoint needs public HTTPS on port 443 with a valid certificate.
-
-### A. DDNS with a reverse proxy
-
-Edit `.env`:
+*DDNS with Caddy.* Set the hostname in `.env`:
 
 ```dotenv
 PUBLIC_URL=https://your-ddns-host.example
 CALENDAR_DOMAIN=your-ddns-host.example
 ```
 
-The hostname must resolve to your reachable public IP. Check that your ISP permits inbound connections and you are not behind carrier-grade NAT. If an AAAA record exists, IPv6 routing must work too. Forward router TCP **80 → NAS port 10080** and **443 → NAS port 10443**. Caddy obtains and renews a free publicly trusted certificate automatically; there is no certificate purchase or manual installation step. The hosted plugin uses the normal external HTTPS port 443.
-
-**If you already run a reverse proxy, use it instead:** proxy this hostname to the calendar container's port 8000 over its Docker network, or to `127.0.0.1:8787` from a host-based proxy. A proxy in another container cannot reach the host using its own `127.0.0.1`; join its network or configure an explicit reachable host address. Keep the TrueNAS management interface on a separate route/port. The bundled Caddy configuration maps only this calendar service.
-
-The included Caddy container binds host ports 10080/10443 to avoid conflicting with TrueNAS's usual management ports. Confirm those two ports are free. Configure port forwarding specifically to these proxy ports, not to the management interface.
+The hostname must resolve to your public IP. Check that your ISP allows inbound connections and that you are not behind carrier-grade NAT; if an AAAA record exists, IPv6 must work too. Forward router TCP 80 to server port 10080 and 443 to 10443. Caddy obtains and renews a Let's Encrypt certificate automatically, and its configuration maps only this service.
 
 ```sh
 sudo docker compose -f compose.yaml -f compose.ddns.yaml up -d
 ```
 
-If using an existing proxy, run `sudo docker compose up -d` instead and configure that proxy separately.
+*Existing reverse proxy.* Proxy the hostname to the calendar container's port 8000 over its Docker network, or to `127.0.0.1:8787` from a proxy on the host, then run `sudo docker compose up -d`. Keep the server's management interface on a separate route.
 
-### B. Tailscale Funnel, no router port forwarding
-
-Use `compose.funnel.yaml` instead of the files above. This creates a separate Tailscale node named `proton-calendar`, not a public route to the NAS's existing Tailscale node.
-
-Create a non-ephemeral Tailscale auth key for this node and save `TS_AUTHKEY=YOUR_KEY` in `secrets/tailscale.env` (root-owned mode 600). Enable MagicDNS, HTTPS certificates and Funnel permission for this node in your tailnet policy using Tailscale's documented setup. The container uses userspace networking, with no privileged mode or host network.
+*Tailscale Funnel.* This creates a separate Tailscale node called `proton-calendar`, so your server's existing node is never exposed. Put a non-ephemeral auth key in `secrets/tailscale.env` as `TS_AUTHKEY=...` (root-owned, mode 600) and enable MagicDNS, HTTPS certificates and Funnel for the node in your tailnet policy.
 
 ```sh
 sudo docker compose -f compose.funnel.yaml up -d tailscale
 sudo docker compose -f compose.funnel.yaml exec tailscale tailscale status
 ```
 
-Use the node's actual assigned `proton-calendar.YOUR_TAILNET.ts.net` hostname. Set `PUBLIC_URL=https://THAT_HOSTNAME` in `.env`, then:
+Set `PUBLIC_URL=https://proton-calendar.YOUR_TAILNET.ts.net` in `.env` using the hostname Tailscale assigned, then:
 
 ```sh
 sudo docker compose -f compose.funnel.yaml up -d calendar
 sudo docker compose -f compose.funnel.yaml exec tailscale tailscale funnel status
 ```
 
-The Funnel configuration is under `tailscale/serve.json`. It publishes the calendar service only. The adapter API key (stored in `secrets/action_api_key`) protects all calendar operations; `/healthz` and the API schema are public and contain no secrets or events. Test from a phone with Tailscale disabled to confirm public reachability. Node expiry and reauthentication still need attention: keep Tailscale state persistent and review the node's key-expiry setting.
+Check public access from a phone with Tailscale switched off, keep the Tailscale state volume persistent and review the node's key expiry.
 
-### TrueNAS Apps: Install via YAML
+## Connect Claude
 
-For a TrueNAS-managed App, follow [the Apps YAML guide](truenas/README.md). Paste one standalone configuration into **Apps → Discover Apps → ⋮ → Install via YAML**:
+The adapter serves a remote MCP connector at `https://YOUR_PUBLIC_HOST/mcp`. `PUBLIC_URL` must be that exact origin, because the OAuth metadata is built from it.
 
-- [Tailscale Funnel](truenas/funnel.yaml)
-- [DDNS with Caddy](truenas/ddns.yaml)
-- [Existing reverse proxy](truenas/existing-proxy.yaml)
+1. Check that `https://YOUR_PUBLIC_HOST/healthz` works from outside your network.
+2. In claude.ai, open **Settings → Connectors → Add custom connector**, give it a name such as `My Proton Calendar` and enter the `/mcp` URL. Leave the advanced OAuth fields empty.
+3. Claude opens an approval page served by your adapter. Paste `ACTION_API_KEY` and choose **Approve**. Only approve a connection you started yourself just now.
+4. Connectors added on claude.ai also appear in the Claude mobile app, and Claude Desktop uses the same flow. Enable it in a chat and ask it to run `getIntegrationStatus`, then `getCalendarContext`.
 
-These files contain the source build and routing configuration, use persistent Docker volumes, and accept environment settings directly in YAML. No prebuilt image or dataset-path replacement is needed. Set the public hostname, private adapter key and login settings, then manage the service through TrueNAS Apps. Run one instance of the adapter, managed by either TrueNAS Apps or shell Compose.
+For Claude Code: `claude mcp add --transport http proton-calendar https://YOUR_PUBLIC_HOST/mcp`, then authenticate from `/mcp`. To allow other redirect URIs, list them comma-separated in `OAUTH_EXTRA_REDIRECT_URIS`. The API key also works directly as a bearer token on `/mcp`.
 
-## 4. Connect the private ChatGPT plugin
+## Connect ChatGPT
 
-A custom GPT is not required. Install **My Proton Calendar** from the Plugins directory and connect it when prompted. Start a new ordinary ChatGPT chat and invoke the plugin by name or with `@` where available. For example: “Use My Proton Calendar to add school tomorrow at 9:45.” Supported plugins can be used on mobile; the complete flow still needs testing on your Pixel with your account.
+ChatGPT uses the plugin in [`calendar-plugin/`](calendar-plugin/README.md), deployed as your own private ChatGPT Sites project:
 
-The published plugin uses the Site-hosted MCP endpoint; do not paste the NAS OpenAPI schema into the GPT editor for this route. After deploying the NAS App:
+1. Set `PROTON_ADAPTER_URL` in the Site's runtime settings to the adapter's public HTTPS origin.
+2. Set `PROTON_ACTION_API_KEY` as a **secret** with the value of `ACTION_API_KEY`. Enter it only in the secure settings, never in chat or source code.
+3. Redeploy the Site's saved version so the settings take effect.
+4. Connect the generated plugin in ChatGPT and ask it to check the calendar connection.
 
-1. Set `PROTON_ADAPTER_URL` in the private Site’s runtime settings to the NAS adapter’s public HTTPS origin.
-2. Set `PROTON_ACTION_API_KEY` as a **secret**, using `ACTION_API_KEY` from the App YAML (or `secrets/action_api_key` for shell Compose). Enter it directly in secure settings, never chat or source.
-3. Redeploy the Site’s existing saved version to activate the runtime settings.
-4. Install/connect the generated private plugin in ChatGPT, and ask it to check the calendar connection.
+Keep both the Site and the plugin private, because they act on your Proton account. If ChatGPT keeps showing an old tool list after an upgrade, disconnect and reconnect the plugin, then start a new chat. Rebuilding the adapter alone does not refresh ChatGPT's tool list.
 
-Sites handles OAuth between ChatGPT and the hosted plugin. The hosted plugin calls the NAS adapter using its secret API key. The Proton session and bridge password stay on the NAS. Keep both the Site and its plugin owner-private because this service uses one Proton account. See [plugin setup](calendar-plugin/README.md) for the complete connection instructions.
+An older [custom GPT with Actions](custom-gpt-alternative.md) is kept as an optional alternative.
 
-After publishing new plugin tools, an existing ChatGPT connection can retain its old tool list. In this installation, disconnecting and reconnecting My Proton Calendar, then starting a new chat, exposed the upgraded tools. Rebuilding the NAS alone does not refresh ChatGPT's tool catalog.
+## Verify before everyday use
 
-The [original custom GPT Action setup](custom-gpt-alternative.md) remains an optional alternative. Its confirmation flags apply only to that route; plugin actions follow the host’s permission controls.
+1. Run `getIntegrationStatus`, then `getCalendarContext`. They should report a reachable adapter, a configured Proton login, your timezone and the correct local time.
+2. Create a disposable test event with an explicit date and time.
+3. Wait for its status to reach `verified`, check it in the official Proton Calendar app, then delete it.
+4. Try "I have school tomorrow at 9:45". The default duration is 60 minutes (`DEFAULT_DURATION_MINUTES`), so the event should end at 10:45.
+5. Repeat the same request: it should return the same job rather than create a duplicate. Also try a date on the other side of a daylight-saving change.
 
-## 4b. Connect Claude (claude.ai, Android app, Desktop and Code)
+## How writes are tracked
 
-Adapter 0.3.0 also serves a remote MCP connector at `https://YOUR_PUBLIC_HOST/mcp` with the same tools. Claude talks to the NAS directly; the ChatGPT Site is not involved, and both can be connected at the same time. `PUBLIC_URL` must be the exact public HTTPS origin, because the OAuth metadata is built from it.
+Requests are queued and answered immediately; one background worker keeps working after the chat turn ends. Poll `getCalendarOperationStatus` (or `getEventStatus` for the custom GPT) with the returned ID:
 
-1. Deploy the updated App YAML and check `https://YOUR_PUBLIC_HOST/healthz` from outside your network.
-2. In claude.ai on the web, open **Settings → Connectors → Add custom connector**. Name it `My Proton Calendar` and enter `https://YOUR_PUBLIC_HOST/mcp` as the URL. Leave the advanced OAuth fields empty.
-3. Claude opens an approval page served by your NAS. Paste `ACTION_API_KEY` from your password manager and choose **Approve**. Approve only a connection you started yourself just now: approval grants access to the Claude account that started it.
-4. Connectors added on claude.ai also appear in the Claude Android app. In a chat, enable the connector from the tools menu and ask it to run `getIntegrationStatus`, then `getCalendarContext`.
+| State | Meaning |
+| --- | --- |
+| `pending`, `writing` | Still in progress. |
+| `ready` / `verified` | Done, and the result was read back from Proton. For edits and deletes, only `result.verified: true` confirms the change. |
+| `failed` | Failed before anything was written. |
+| `unknown` | The write may or may not have happened. Check with `verifyEventWrite` or in Proton before trying again. |
 
-For Claude Code, run `claude mcp add --transport http proton-calendar https://YOUR_PUBLIC_HOST/mcp`, then authenticate it from `/mcp`. Claude Desktop uses the same custom-connector flow as claude.ai.
+Before editing, call `getCalendarEvent` to get the UID, calendar ID and current revision. Specify `event`, `series` or `occurrence` scope explicitly. Rescheduling a series that already has edited occurrences needs a manual check in Proton.
 
-Security model: one owner, no user accounts. Registration accepts only Claude's callback URLs and loopback redirects (`OAUTH_EXTRA_REDIRECT_URIS` adds others, comma separated). PKCE is required. The approval page allows five wrong keys per 15 minutes. Access tokens last one hour; refresh tokens last 60 days and rotate on use. Only hashes of tokens are stored, in `jobs.sqlite`. **Changing `ACTION_API_KEY` revokes every Claude connection.** The adapter key also works directly as a bearer token on `/mcp`. Claude asks for tool permissions under its own settings; the instructions not to retry unknown writes or to follow calendar text still apply.
+Identical requests reuse their job permanently, even after a restart. If you delete a verified event by hand, repeating the same request reports the original job and does not recreate it. Never delete the database just to retry an uncertain write without checking the calendar first.
 
-## 5. Verify before everyday use
+## Maintenance
 
-1. Ask the connected plugin to run `getIntegrationStatus`, then `getCalendarContext`. It should report a reachable connection, configured Proton login, Europe/Helsinki and the correct current local time.
-2. Ask for a disposable test event with an explicit date, start and end time.
-3. Confirm its status reaches `verified` and inspect it in the official Proton Calendar Android app. Delete the test manually.
-4. Ask "I have school tomorrow at 9:45". The default duration is 60 minutes, so the proposed event ends at 10:45. Change `DEFAULT_DURATION_MINUTES` to your preference.
-5. Test repeating the exact request: it should reuse the same job rather than create a duplicate. Test a winter date and a daylight-saving transition; ChatGPT should use the event date’s timezone offset and clarify ambiguous times.
+- **Log in again:** stop the adapter, run `carbonate auth ... -keep-bridge-password` with the same session path to keep your bridge password, then start it again.
+- **Troubleshooting:** check the container logs for configuration errors. `carbonate calendars -session /data/auth.json` tests the Proton login, but prints your calendar names.
+- **Removal:** stop the App or Compose stack, disconnect the plugin or connector, revoke the bridge's session in Proton, and remove the Funnel or proxy route. Deleting the containers does not delete `data/` or `secrets/`; keep or securely erase them according to your backup policy.
 
-The API queues writes and returns promptly. A single background worker continues after the chat turn. The plugin exposes job status so ChatGPT can check the same job without resubmitting the event. `verified` means the bridge wrote an event and then read back matching UID, title, dates, location and description from Proton, including recurrence and device reminders when present. `pending`/`writing` mean it hasn't finished. `unknown` means it could already be saved: use `verifyEventWrite` for read-only reconciliation or inspect Proton manually; the adapter deliberately doesn't blindly repeat uncertain writes.
-
-Identical normalized requests reuse a durable job forever, including after restart. If you manually delete a verified event, repeating that identical request reports its original verified job; it does not recreate it or prove it still exists. This version has no job reset/retry UI. Never delete the database just to retry an uncertain write without checking the calendar first.
-
-## Calendar operations in v0.2
-
-The updated adapter and plugin support:
-
-- List calendars, read event/series details, search title/description/location, and list occurrences within up to 366 days. Read one calendar per request and use pagination for large results.
-- Create timed or all-day events; all-day end dates are exclusive. Timed dates require explicit UTC offsets.
-- Edit/reschedule or delete an individual event after reading its current revision. Unspecified fields, existing reminders and provider properties are preserved.
-- Daily, weekly, monthly and yearly recurrence with interval, optional count or end time, and optional weekdays. Timed series require an IANA timezone such as `Europe/Helsinki`, retaining local time across DST. All-day series use count rather than until.
-- Edit a series or one occurrence, and cancel a selected occurrence without deleting the series. Occurrence changes use the original recurrence ID even after rescheduling. Rescheduling a series that already has exceptions requires manual review in Proton.
-- Add, replace, remove and read up to five device reminders, expressed as minutes before start (0–10080). An empty list removes reminders. Existing email reminders are preserved during unrelated edits; this version creates device reminders only. Device notification delivery depends on Proton and the device and is not proven by a saved alarm.
-
-Read and mutation requests use a durable background queue so the chat connection does not time out while the bridge decrypts a calendar. Poll `getCalendarOperationStatus`: `ready` contains the result, `failed` is a pre-write failure, and `unknown` requires inspection before further mutations. Only `result.verified: true` confirms an edit/delete read-back. Mutations with the same input and revision reuse the original operation. New reads always obtain fresh data.
-
-Before editing, use `getCalendarEvent` to obtain the UID, calendar ID and current revision. A stale revision rejects the mutation. Specify `event`, `series` or `occurrence` explicitly; the assistant should clarify ambiguous scope. Attendee events and events with unverifiable signatures remain read-only. This is not an official Proton integration or a claim of complete Google Calendar feature parity. Invitations and calendar sharing are outside this release.
-
-See [the live acceptance checklist](ACCEPTANCE.md) and [completion target](ROADMAP.md). Keep Test 2 unchanged during testing.
-
-## Maintenance and removal
-
-Before logging in again, stop the adapter. Use `carbonate auth ... -keep-bridge-password` with the same session path to retain your bridge password. Start the adapter again afterwards. Its entrypoint loads that password from the secret file for CLI commands too.
-
-Inspect container startup logs for configuration errors. To troubleshoot a Proton login locally, stop the adapter and run `sudo docker compose run --rm --no-deps calendar carbonate calendars -session /data/auth.json`. This command displays private calendar names. The web adapter returns generic upstream errors rather than exposing Proton error output or credentials.
-
-To remove, stop the TrueNAS App or chosen Compose stack, disconnect/uninstall the plugin (or remove the optional custom GPT/Action), revoke the bridge's Proton session, and disable Funnel or remove the reverse-proxy route. Keep or securely remove `data/` and `secrets/` according to your backup policy. Deleting containers alone does not delete bind-mounted credentials.
-
-## Local developer tests
+## Development
 
 ```sh
 python3 -m venv .venv
@@ -170,19 +199,21 @@ python3 -m venv .venv
 .venv/bin/python -m pytest -q
 ```
 
-Tests cover authorization, input validation, UTC normalization, iCalendar escaping, duplicate prevention, queue limits, uncertain writes and read-back verification using a fake bridge. They do not prove Carbonate can log in or save events to your real account.
+The Python tests use a fake bridge and cover authorisation, the OAuth and MCP flow, input validation, UTC and timezone handling, iCalendar escaping, recurrence, duplicate prevention, queue limits, uncertain writes and read-back verification. `tests/recurrence_wire_test.go` tests the bridge patch, and the plugin has its own Node tests (see [`calendar-plugin/README.md`](calendar-plugin/README.md)). None of these prove that Carbonate can log in to a real account; [ACCEPTANCE.md](ACCEPTANCE.md) covers the live checks.
+
+After changing the adapter source, Dockerfile, CLI patch or routing configuration, regenerate the TrueNAS YAML files with `python3 truenas/generate-yaml.py`.
+
+## Licence
+
+The original source is released under the [MIT License](LICENSE). Carbonate, the Python dependencies and parts of `calendar-plugin/` have their own licences, and some ChatGPT Sites tooling files carry no licence; see [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## References
 
+- [Carbonate source and limitations](https://github.com/develonrails/carbonate)
 - [ChatGPT plugins and mobile support](https://learn.chatgpt.com/docs/plugins)
 - [MCP plugin authentication](https://developers.openai.com/plugins/build/auth)
-
 - [GPT Actions](https://developers.openai.com/api/docs/actions/introduction)
-- [Action authentication](https://developers.openai.com/api/docs/actions/authentication)
-- [HTTPS, timeouts and confirmation controls](https://developers.openai.com/api/docs/actions/production)
-- [Carbonate source and limitations](https://github.com/develonrails/carbonate)
 - [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel)
 - [Tailscale Docker configuration](https://tailscale.com/docs/features/containers/docker/docker-params)
 - [TrueNAS custom Apps](https://www.truenas.com/docs/scale/apps/installcustomappscreens/)
 - [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https)
-- [Let's Encrypt](https://letsencrypt.org/getting-started/)

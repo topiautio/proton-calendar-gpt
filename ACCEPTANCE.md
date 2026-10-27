@@ -1,24 +1,26 @@
 # Live acceptance for v0.2
 
-The release is complete only after these checks pass through the installed private
+The release is complete only after these checks pass through the installed
 ChatGPT plugin and the official Proton Calendar application. Local tests exercise
 a fake bridge and cannot establish live compatibility or delivered notifications.
 
 ## Before testing
 
-- Preserve the owner's existing Test 2 (6 October 2026, 13:00–14:00 Helsinki).
+- Leave existing real appointments untouched. Keep one pre-existing reference
+  event to read during the checks, and do not edit or delete it.
 - Confirm connection status, Proton login and `getCalendarContext.api_version: 2`.
-- List calendars and confirm the configured default is Kalenteri. Do not change
-  calendar configuration or modify existing real appointments while testing.
+- List calendars and confirm the configured default is the intended calendar.
+  Do not change calendar configuration while testing.
 - Use uniquely named disposable acceptance events. Read the target before every
   edit/delete, supplying its current revision. Avoid attendees/invitations.
 
 ## Checks
 
-1. Reconcile Test 2's old unknown creation job using `verifyEventWrite`. Poll the
-   operation, then confirm its original job is verified. This is read-only.
-2. List today's events and search for Test 2. Read its full details and confirm
-   its existing title/times without altering it.
+1. If an earlier creation job ended `unknown`, reconcile it using
+   `verifyEventWrite`. Poll the operation, then confirm the original job is
+   verified. This is read-only.
+2. List today's events and search for the reference event. Read its full details
+   and confirm its title and times without altering it.
 3. Create a disposable timed event with a 15-minute device reminder. Poll until
    verified and independently read the event/reminder back through the plugin.
 4. Reschedule that disposable event and edit its title. Confirm verified status,
@@ -33,16 +35,15 @@ a fake bridge and cannot establish live compatibility or delivered notifications
    explicitly requested; ambiguous requests should trigger clarification.
 8. Create/read/edit a disposable all-day event and confirm its exclusive end date.
 9. Delete only the disposable acceptance events/series. Confirm verified deletion
-   and fresh reads showing absence. Leave Test 2 unchanged.
+   and fresh reads showing absence. Leave the reference event unchanged.
 10. Repeat an identical creation request or mutation input/revision: it returns
     the original job/operation instead of creating a duplicate. A stale revision
     must fail without writing. Restarting the App preserves the session and queue.
 
 ## Checkpoint: 6 October 2026
 
-TrueNAS runs adapter 0.2.4. The private hosted plugin uses source
-`1405c5c5b05200060e1c4c401ca8e329b32a8aa8` and deployed successfully.
-Reconnecting previously resolved the stale tool catalog.
+TrueNAS runs adapter 0.2.4 and the hosted plugin is deployed. Reconnecting the
+plugin resolved a stale tool catalog.
 
 Verified live through the authenticated adapter:
 
@@ -56,21 +57,21 @@ Verified live through the authenticated adapter:
 - Cancelling one occurrence with EXDATE plus targeted exception removal;
   adapter 0.2.4 reports ready/verified.
 - Individual and whole-series deletion. All recurrence acceptance events were
-  deleted with verified status. Test 2 was retained unchanged.
-- Repeating the exact notification-test creation request reuses its original
-  verified job; it does not create another event.
-- The owner's phone received the five-minute notification for the 17:20
-  Helsinki test on 6 October, as confirmed at 17:15.
+  deleted with verified status. The reference event was left unchanged.
+- Repeating the exact creation request for a notification test reuses its
+  original verified job; it does not create another event.
+- A five-minute device reminder was delivered to an Android phone at the
+  expected time.
 
 Verified through regular ChatGPT's installed plugin:
 
-- Listing Vanha, Holidays in Finland and Kalenteri; searching and reading Test 2.
+- Listing calendars; searching for and reading the reference event.
 - Creating/reading a disposable weekly series with reminders. Its whole-series
   title/reminder edit eventually verified on the adapter; a fresh read confirmed
   both occurrences changed. Its cleanup through the adapter verified.
-- Reading the phone test's correct title, times and reminder with verified
-  signatures. Operation `0be93f6b92554882bec096973814f3c7` reached ready after one
-  status poll under the improved hosted polling behavior.
+- Reading the notification test's title, times and reminder with verified
+  signatures. The operation reached ready after one status poll under the
+  improved hosted polling behavior.
 
 Hosted status tools now wait up to 24 seconds per call using only read-only GETs
 against the original job. They return terminal states promptly, remain bounded,
@@ -80,7 +81,7 @@ exact compressed inline Docker build pass.
 
 The TrueNAS Save/logout cause was its 65,536-character authenticated WebSocket
 message limit. Expanded YAML exceeded it and the connection closed before a job
-started. Compressed embedded source reduced private YAML to about 27 KB. Both
+started. Compressed embedded source reduced the App YAML to about 27 KB. Both
 updates subsequently saved, rebuilt and returned to RUNNING with the session
 intact. Generated templates enforce a size budget with headroom for settings.
 The editor must finish loading its existing YAML before pasting an update.
@@ -92,18 +93,16 @@ absent and other dates retained. Normalizing exclusions as sets of actual dates
 fixed verification, including duplicate signed cards and equivalent timezones.
 
 Remaining final host check: ChatGPT was sent an explicit description-edit and
-cleanup request for only the completed phone test
-`46fe94ae607cf7c5994a2dcc5b1f730aac05090ffc0cc0570636c3f2500ecd4b@private-proton-gpt`.
-It returned no assistant result for those messages. A fresh adapter read confirms
-that event still exists with its original description/revision. The owner saw no action approval or error. A shorter request with the app
-explicitly attached also returned no assistant result. The chat was opened for
-the owner to continue directly. No further mutation
-was submitted from the adapter, avoiding a race with a pending host approval.
-The phone test is retained until this is resolved; Test 2 remains unchanged.
+cleanup request for the completed notification test event. It returned no
+assistant result, and no action approval or error was shown. A shorter request
+with the app explicitly attached also returned no assistant result. A fresh
+adapter read confirms the event still exists with its original description and
+revision. No further mutation was submitted from the adapter, to avoid racing a
+possibly pending host approval. The test event is kept until this is resolved.
 
 Notification delivery and the adapter capabilities have passed. The release is
 not marked complete until the remaining ChatGPT mutation/cleanup check resolves.
-Attendee invitations are intentionally outside this agreed first-version scope.
+Attendee invitations are intentionally outside the first-version scope.
 
 ## Checkpoint: 10 October 2026 — Claude connector
 
@@ -112,12 +111,11 @@ in the existing App YAML (about 40 KB; environment settings unchanged). The
 adapter now serves a remote MCP endpoint at `/mcp` with single-owner OAuth
 (dynamic client registration, PKCE S256, approval with `ACTION_API_KEY`).
 
-Verified live through claude.ai with the custom connector My Proton Calendar:
+Verified live through claude.ai with a custom connector:
 
-- claude.ai detected OAuth and dynamic registration automatically; the owner
-  approved on the NAS page and all eleven tools were listed.
-- Creating disposable event "Claude connector test" (11 October 12:00–12:30
-  Helsinki) progressed pending → writing → verified.
+- claude.ai detected OAuth and dynamic registration automatically; approval on
+  the adapter's page succeeded and all eleven tools were listed.
+- Creating a disposable timed event progressed pending → writing → verified.
 - The same chat found it with listCalendarEvents, read its revision and deleted
   it with scope `event`; the deletion reached ready with `verified: true`. No
   other events were touched.
