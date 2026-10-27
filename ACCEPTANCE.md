@@ -122,3 +122,9 @@ Verified live through claude.ai with a custom connector:
 
 Forty-nine Python tests pass, including the OAuth and MCP flow. The official MCP
 Python SDK client completed discovery, registration, PKCE and tool calls locally.
+
+## Later use
+
+The ChatGPT check left open on 6 October is closed: the ChatGPT plugin works in
+everyday use. Requests through both ChatGPT and Claude can take tens of seconds
+before the assistant answers.

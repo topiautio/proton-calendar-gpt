@@ -36,7 +36,9 @@ no assistant result, and the cause is not yet known. That notification test even
 is kept, while all recurrence acceptance events are deleted. See ACCEPTANCE.md.
 
 Adapter 0.3.0 (10 October 2026) adds a Claude connector, verified live on
-claude.ai.
+claude.ai. The ChatGPT check left open on 6 October has since been closed: both
+the ChatGPT plugin and the Claude connector work in everyday use, though a
+request can take tens of seconds.
 
 Local tests do not establish live Proton compatibility. Completion requires live
 read-back plus explicit edit, recurrence and reminder tests on disposable events.

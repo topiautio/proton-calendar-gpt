@@ -63,7 +63,7 @@ Adapter 0.3.0. Tested in October 2026 against a real Proton account, directly th
 - ChatGPT: listing calendars, searching and reading events, and creating and editing a recurring series.
 - Claude on claude.ai: OAuth discovery and approval, then creating, finding and deleting an event.
 
-One ChatGPT check is still open: a final edit and cleanup request returned no result from the ChatGPT host. See [ACCEPTANCE.md](ACCEPTANCE.md) for the full checklist and findings, and [ROADMAP.md](ROADMAP.md) for the completion target.
+The ChatGPT plugin and the Claude connector both work in everyday use, but expect them to be slow: a calendar request can take tens of seconds in either assistant. See [ACCEPTANCE.md](ACCEPTANCE.md) for the full checklist and findings, and [ROADMAP.md](ROADMAP.md) for the completion target.
 
 ## Setup
 
