@@ -2,7 +2,8 @@
 services:
   calendar:
     build: .
-    image: private-proton-calendar:0.1.0
+    image: proton-calendar:local
+    pull_policy: build
     restart: unless-stopped
     init: true
     environment:
