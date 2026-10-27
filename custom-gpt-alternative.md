@@ -12,7 +12,7 @@ The Action key is shared with OpenAI so ChatGPT can call your server. Your Proto
 
 The write operation has `x-openai-isConsequential: false` so ChatGPT can offer its "Always allow" control for routine personal event creation. Initial approval or product-specific confirmations may still appear. This is not a promise that every action runs without a prompt. It only creates individual events, with no guests, deletion, or editing tools.
 
-Open the saved GPT in ChatGPT on your Pixel. Typed input or keyboard dictation are the initial target; live voice-mode Action support is not verified.
+Open the saved GPT in the ChatGPT app on your phone. Typed input or keyboard dictation are the initial target; live voice-mode Action support is not verified.
 
 
 For GPT Action-specific configuration, see [OpenAI’s Actions documentation](https://developers.openai.com/api/docs/actions/introduction).

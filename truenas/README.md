@@ -2,7 +2,7 @@
 
 **No SSH or NAS host shell is required for the normal setup.** Paste one of these self-contained files into **Apps → Discover Apps → ⋮ → Install via YAML**, name the App `proton-calendar`, and set its environment values. TrueNAS builds the embedded source, initializes its Docker volumes and starts the service. No source upload, prebuilt local image, `.env` file or manually created secret files are needed.
 
-The checked NAS runs TrueNAS 25.10.7 and Docker Compose 2.38.1. Inline Dockerfiles require Compose 2.17 or newer. The initial build needs internet access and takes longer than downloading a ready-made image.
+Tested on TrueNAS 25.10.7 with Docker Compose 2.38.1. Inline Dockerfiles require Compose 2.17 or newer. The initial build needs internet access and takes longer than downloading a ready-made image.
 
 | File | Connection |
 | --- | --- |
@@ -90,7 +90,7 @@ Keep this App as the only adapter for the Proton session. Use TrueNAS Apps for i
 python3 truenas/generate-yaml.py
 ```
 
-The YAML configurations and bootstrap behavior are verified locally. The owner deployed the App through the TrueNAS UI, and live login, reads, ordinary mutations and recurring creation have been tested. Single-occurrence mutations remain under investigation; see [acceptance results](../ACCEPTANCE.md). No App was installed or modified through the read-only SSH access. The separate shell Compose files remain an optional developer installation route.
+The YAML configurations and bootstrap behavior are tested locally, and a real TrueNAS deployment has passed the live checks in [acceptance results](../ACCEPTANCE.md). The separate shell Compose files remain an optional developer installation route.
 
 References: [TrueNAS custom Apps](https://www.truenas.com/docs/scale/apps/installcustomappscreens/), [Docker inline build support](https://docs.docker.com/reference/compose-file/build/#dockerfile_inline).
 
@@ -99,8 +99,8 @@ References: [TrueNAS custom Apps](https://www.truenas.com/docs/scale/apps/instal
 
 Edit the existing App's YAML; do not install a second App. Preserve its environment values, routing and persistent volumes. Replace only `services.calendar.build.dockerfile_inline` with the source block from the new generated file for your connection type. Set `pull_policy: build` alongside `build` under the calendar service, then save and allow TrueNAS to rebuild. Without that policy, TrueNAS can reuse the old cached image even after the inline source changes. An existing Proton session is reused without another login.
 
-For this development installation, the local `proton-calendar-upgrade.private.yaml` is a ready-to-paste copy of the current App configuration with only the build source updated. It contains private settings, is excluded from Git and must not be shared. Paste it into the **existing** App's Edit YAML screen and save. Do not remove or reset its volumes.
+Keep your filled-in App YAML, which contains your settings and secrets, outside this repository. Paste the updated configuration into the **existing** App's Edit YAML screen and save. Do not remove or reset its volumes.
 
-After the rebuild, `getCalendarContext` should report `api_version: 2` and `adapter_version: 0.2.3`. Run the live acceptance checklist before calling the project complete. Read-only SSH access was used to inspect and preserve configuration. Updates were applied through the signed-in TrueNAS UI with the owner's authorization. If Save signs you out, inspect Jobs History and the running adapter version before assuming the rebuild completed.
+After the rebuild, `getCalendarContext` should report `api_version: 2` and the new `adapter_version`. If Save signs you out, inspect Jobs History and the running adapter version before assuming the rebuild completed.
 
 If Save immediately signs you out, check the JSON-encoded request size. TrueNAS closes authenticated WebSocket requests larger than 65,536 characters before starting a job. Regenerate the compressed templates rather than increasing that limit. Wait for the editor to finish loading its existing YAML before pasting an update.
